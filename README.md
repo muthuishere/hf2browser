@@ -11,6 +11,13 @@ no cloud, no server-side inference.
 task up          # build + serve, opens the browser, do everything from there
 ```
 
+The converted models are then run by
+**[browser-llm-nexus](https://www.npmjs.com/package/browser-llm-nexus)**
+[![npm](https://img.shields.io/npm/v/browser-llm-nexus?color=cb3837&logo=npm)](https://www.npmjs.com/package/browser-llm-nexus)
+— the browser runtime this project pairs with (`npm install browser-llm-nexus`). It is a
+separate, standalone package: tool calling, embeddings, RAG and offline bundles, on GPU or
+CPU with the same API. This repo produces models for it; it does not depend on this repo.
+
 ## What's inside
 
 | piece | language | job |
@@ -65,10 +72,11 @@ auto-picks a free one from 8917).
 
 ## Running the converted models
 
-Converted models are plain Transformers.js folders — load them with anything. The
-companion runtime is **[browser-llm-nexus](https://github.com/muthuishere/browser-llm-nexus)**
-(`npm install browser-llm-nexus`): GPU or CPU with the same API, plus tool calling,
-embeddings, RAG and offline knowledge bundles.
+Converted models are plain Transformers.js folders — load them with anything. The companion
+runtime is **[browser-llm-nexus](https://www.npmjs.com/package/browser-llm-nexus)** on npm
+(`npm install browser-llm-nexus`) — zero dependencies, TypeScript types included, GPU or CPU
+with the same API, plus tool calling, embeddings, RAG and offline knowledge bundles.
+This repo's own demo page and CPU verifier both run on it.
 
 ```ts
 import { NexusChat } from 'browser-llm-nexus';
