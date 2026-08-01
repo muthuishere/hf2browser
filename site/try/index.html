@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>hf2browser — chat with an LLM in this tab</title>
+<meta name="description" content="A converted LLM running entirely in your browser, calling JavaScript tools you can edit live. No server, no API key." />
+<style>
+  :root { --fg:#1a1a1a; --muted:#666; --bg:#fff; --card:#f6f6f6; --accent:#0a66c2; --line:#8883; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#eee; --muted:#999; --bg:#101014; --card:#1c1c22; --accent:#58a6ff; } }
+  body { font-family: -apple-system, system-ui, sans-serif; color: var(--fg); background: var(--bg);
+         max-width: 780px; margin: 2.5rem auto; padding: 0 1.25rem; line-height: 1.6; }
+  h1 { font-size: 1.6rem; margin-bottom: .25rem; }
+  .muted { color: var(--muted); font-size: .88rem; }
+  input, button, textarea { font-size: .95rem; padding: .55rem .7rem; border-radius: 8px;
+                            border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+  button.primary { background: var(--accent); color: #fff; border: none; cursor: pointer; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  #row { display: flex; gap: .5rem; margin: 1rem 0; }
+  #prompt { flex: 1; }
+  #out { white-space: pre-wrap; background: var(--card); border-radius: 10px; padding: 1rem; min-height: 6rem; }
+  #tools { display: none; background: var(--card); border-radius: 10px; padding: .8rem;
+           font-size: .8rem; overflow-x: auto; margin-top: .6rem; font-family: ui-monospace, monospace; }
+  textarea { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; font-size: .8rem; }
+  details { margin-top: 1.2rem; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  a { color: var(--accent); }
+  .note { background: var(--card); border-radius: 10px; padding: .9rem 1rem; margin: 1rem 0; font-size: .9rem; }
+  footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
+</style>
+</head>
+<body>
+
+<h1>Chat with an LLM running in this tab</h1>
+<p class="muted">A converted model, quantized to q4, streamed from the Hugging Face Hub. Once it
+loads, everything — the model, the tool calls, the answers — happens on your machine.
+<span id="where"></span></p>
+
+<div class="note">
+  The model downloads from the Hugging Face Hub the first time, then it is cached and later
+  visits are instant. Nothing is uploaded, and no key is needed.
+  <div style="margin-top:.7rem">
+    <label>model
+      <select id="model">
+        <option value="qwen3">Qwen3-0.6B — tool calling, ~1 GB</option>
+        <option value="smol">SmolLM2-135M — chat only, ~180 MB</option>
+      </select>
+    </label>
+    <button class="primary" id="load">Load it</button>
+  </div>
+  <p class="muted" style="margin:.7rem 0 0">Tool calling needs the larger model: at q4 a 135M
+  model chats fine but answers weather questions from imagination instead of calling the tool.
+  A browser tab that is low on memory may fail on the 1 GB one — the smaller model always works.</p>
+</div>
+
+<div id="row" hidden>
+  <input id="prompt" value="What is the weather in Chennai right now?" />
+  <button class="primary" id="send" disabled>Send</button>
+</div>
+
+<div id="out">Pick a model and press <em>Load it</em> to begin.</div>
+<pre id="tools"></pre>
+
+<details>
+  <summary>The tools it can call — real JavaScript, edit and re-apply</summary>
+  <p class="muted">Each <code>tool(name, description, schema, handler)</code> registers a function the
+     model may call. Change one, hit Apply, and ask again — no reload.</p>
+  <textarea id="toolcode" rows="9" spellcheck="false"></textarea>
+  <button id="apply">Apply tools</button> <span id="toolinfo" class="muted"></span>
+</details>
+
+<p class="muted" style="margin-top:1.5rem">
+  This page is one HTML file with no build step. <a href="https://github.com/muthuishere/hf2browser">hf2browser</a>
+  generates one like it for every model you convert, and
+  <a href="https://www.npmjs.com/package/browser-llm-nexus">browser-llm-nexus</a> is the runtime doing the work.
+</p>
+
+<footer>
+  <a href="../">← hf2browser</a> · MIT ·
+  <span id="metrics"></span>
+</footer>
+
+<script type="module">
+import { NexusChat } from 'https://cdn.jsdelivr.net/npm/browser-llm-nexus@0.4.2/dist/index.js';
+
+// Straight from the Hub — no server of ours involved. q4 is pinned rather than
+// probed: on WebGPU the probe prefers fp16, and fp16 graphs for these models are
+// broken (the float16 converter gap hf2browser measures per model).
+const MODELS = {
+  qwen3: { hub: 'onnx-community/Qwen3-0.6B-ONNX' },
+  smol:  { hub: 'HuggingFaceTB/SmolLM2-135M-Instruct' },
+};
+const DTYPE = 'q4';
+
+const DEFAULT_TOOLS = `tool('get_weather', 'Get current weather for a city', { city: 'string' },
+  async ({ city }) => ({ city, temperature_c: 31, condition: 'humid', source: 'mock' }));
+
+tool('get_watch_count', 'Get how many watches the user owns', {},
+  async () => ({ watches: 7, favourite: 'Casio F-91W' }));
+`;
+
+const $ = (id) => document.getElementById(id);
+const out = (t) => { $('out').textContent = t; };
+const add = (t) => { $('out').textContent += t; };
+$('toolcode').value = DEFAULT_TOOLS;
+
+let chat = null;
+
+$('load').onclick = async () => {
+  $('load').disabled = true;
+  out('Downloading the model — this is the slow part, and only happens once.');
+  const t0 = performance.now();
+  try {
+    chat = await NexusChat.load(MODELS[$('model').value], {
+      dtype: DTYPE,
+      onProgress: (p) => {
+        if (p.status === 'progress' && p.file) out(`${p.file} — ${Math.round(p.progress || 0)}%`);
+      },
+    });
+    chat.on('token', add);
+    chat.on('toolCall', (call, result) => {
+      $('tools').style.display = 'block';
+      $('tools').textContent += `→ ${call.name}(${JSON.stringify(call.arguments)})\n← ${JSON.stringify(result)}\n`;
+      // Replace: what streamed so far is the raw <tool_call> markup, which
+      // belongs in the panel below, not in the answer.
+      out(`[ran ${call.name} — using the result…]\n`);
+    });
+    await applyTools();
+    $('where').textContent = `Running on ${chat.device} · ${chat.dtype} · ready in ${((performance.now() - t0) / 1000).toFixed(1)}s.`;
+    out('Ready. Ask anything — weather questions exercise the tool loop.');
+    $('row').hidden = false;
+    $('send').disabled = false;
+  } catch (e) {
+    const msg = String(e && e.message || e);
+    out('Could not load the model: ' + msg +
+      (/Cache/i.test(msg)
+        ? '\n\nThis browser refused to cache a model this large — private windows and tight storage quotas do that. Try a normal window.'
+        : '\n\nA WebGPU-capable browser is fastest, but any modern browser should manage on CPU.'));
+    $('load').disabled = false;
+  }
+};
+
+async function applyTools() {
+  if (!chat) return;
+  try {
+    const names = await chat.evalTools($('toolcode').value);
+    $('toolinfo').textContent = 'registered: ' + names.join(', ');
+  } catch (e) {
+    $('toolinfo').textContent = 'tool code error: ' + e.message;
+  }
+}
+$('apply').onclick = applyTools;
+
+$('send').onclick = async () => {
+  $('send').disabled = true;
+  out(''); $('tools').textContent = ''; $('tools').style.display = 'none';
+  try {
+    await chat.chat($('prompt').value);
+    const m = chat.metrics.summary();
+    $('metrics').textContent = m.tokens_per_second ? `${m.tokens_per_second} tok/s` : '';
+  } catch (e) {
+    out('error: ' + e.message);
+  }
+  $('send').disabled = false;
+};
+</script>
+</body>
+</html>

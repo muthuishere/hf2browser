@@ -3,53 +3,104 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>hf2browser — any Hugging Face LLM, in your browser, on CPU, with tool calling</title>
+<title>hf2browser — any Hugging Face LLM, running in your browser, with tool calling</title>
+<meta name="description" content="Convert any Hugging Face LLM to a browser-ready ONNX model with tool calling, then ship it as a portable zip and a single self-contained HTML page." />
 <style>
-  :root { --fg: #1a1a1a; --muted: #666; --bg: #fff; --card: #f6f6f6; --accent: #0a66c2; }
+  :root { --fg: #1a1a1a; --muted: #666; --bg: #fff; --card: #f6f6f6; --accent: #0a66c2; --line: #8883; }
   @media (prefers-color-scheme: dark) { :root { --fg: #eee; --muted: #999; --bg: #101014; --card: #1c1c22; --accent: #58a6ff; } }
-  body { font-family: -apple-system, sans-serif; color: var(--fg); background: var(--bg); max-width: 760px; margin: 3rem auto; padding: 0 1.25rem; line-height: 1.6; }
-  h1 { font-size: 2rem; margin-bottom: .25rem; }
+  body { font-family: -apple-system, system-ui, sans-serif; color: var(--fg); background: var(--bg);
+         max-width: 780px; margin: 3rem auto; padding: 0 1.25rem; line-height: 1.6; }
+  h1 { font-size: 2.1rem; margin-bottom: .25rem; }
+  h2 { margin-top: 2.5rem; }
   .tag { color: var(--muted); font-size: 1.05rem; margin-top: 0; }
   pre { background: var(--card); border-radius: 10px; padding: 1rem; overflow-x: auto; font-size: .85rem; }
-  a.btn { display: inline-block; background: var(--accent); color: #fff; padding: .6rem 1.1rem; border-radius: 8px; text-decoration: none; font-weight: 600; margin: .5rem .5rem 0 0; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  a.btn { display: inline-block; background: var(--accent); color: #fff; padding: .6rem 1.1rem;
+          border-radius: 8px; text-decoration: none; font-weight: 600; margin: .5rem .5rem 0 0; }
+  a.btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
   a { color: var(--accent); }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .75rem; margin: 1.5rem 0; }
   .card { background: var(--card); border-radius: 10px; padding: 1rem; }
   .card h3 { margin: 0 0 .35rem; font-size: 1rem; }
   .card p { margin: 0; color: var(--muted); font-size: .88rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; margin: 1rem 0; }
+  td, th { text-align: left; padding: .45rem .5rem; border-bottom: 1px solid var(--line); }
+  footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line);
+           color: var(--muted); font-size: .85rem; }
 </style>
 </head>
 <body>
+
 <h1>hf2browser</h1>
-<p class="tag">Any Hugging Face LLM → running in your browser on plain CPU — with JavaScript tool calling. No WebGPU, no cloud.</p>
+<p class="tag">Any Hugging Face LLM → running in your browser, calling <strong>your JavaScript
+functions</strong>. WebGPU when the browser has it, plain CPU when it doesn't. No cloud,
+no server-side inference, no API key.</p>
 
 <p>
-  <a class="btn" href="https://github.com/muthuishere/hf2browser">GitHub</a>
-  <a class="btn" href="https://github.com/muthuishere/hf2browser#quick-start">Quick start</a>
+  <a class="btn" href="./try/">Try it in this browser →</a>
+  <a class="btn ghost" href="https://github.com/muthuishere/hf2browser/releases/latest">Download</a>
+  <a class="btn ghost" href="https://github.com/muthuishere/hf2browser">GitHub</a>
 </p>
 
-<pre>git clone https://github.com/muthuishere/hf2browser && cd hf2browser
-task up     # builds, serves, opens the browser — search → convert → chat</pre>
+<p class="tag">The <a href="./try/">live demo</a> needs no install — it streams a converted model
+straight from the Hugging Face Hub into this page. To convert your <em>own</em> models, run the
+binary locally.</p>
+
+<h2>Run it</h2>
+
+<p>One executable. The Python export pipeline, the CPU verifier and the chat UI are compiled
+in, so there is nothing to clone and nothing to build:</p>
+
+<pre># download the binary for your platform from Releases, then
+chmod +x hf2browser && ./hf2browser serve
+#  → opens the UI: search the Hub → convert → chat, all local</pre>
 
 <div class="grid">
-  <div class="card"><h3>Search with tool-calling detection</h3><p>Live HF Hub search flags which models can actually call tools, with size estimates before you download.</p></div>
-  <div class="card"><h3>One-click conversion</h3><p>ONNX export + q4 quantization, streamed live. New architectures auto-retry with a modern toolchain.</p></div>
+  <div class="card"><h3>Search with tool-calling detection</h3><p>Live Hub search flags which models can actually call tools, with download-size estimates before you commit.</p></div>
+  <div class="card"><h3>One-command conversion</h3><p>ONNX export + q4 quantization, streamed live. New architectures auto-retry with a modern toolchain.</p></div>
   <div class="card"><h3>Verified, not assumed</h3><p>Every conversion is behaviorally tested on CPU — including whether it really emits schema-valid tool calls.</p></div>
-  <div class="card"><h3>browser-llm-nexus</h3><p>Tiny runtime: register JS tools with JSON schema, get an agentic parse → execute → answer loop in the browser.</p></div>
+  <div class="card"><h3>Then take it anywhere</h3><p>Each model exports as a portable <code>model.zip</code> and a single self-contained <code>chat.html</code> you can host anywhere.</p></div>
 </div>
 
-<h2>browser-llm-nexus in ten lines</h2>
+<h2>What you get out</h2>
+
+<table>
+  <tr><th>artifact</th><th>what it is</th></tr>
+  <tr><td><code>model.zip</code></td><td>the weights as one portable archive — a manifest plus the files</td></tr>
+  <tr><td><code>chat.html</code></td><td>a complete chat page in one file: no build step, no framework, no server</td></tr>
+  <tr><td><code>models/&lt;id&gt;/</code></td><td>a plain Transformers.js folder, if you'd rather serve it yourself</td></tr>
+</table>
+
+<h2>Use it from your own page</h2>
+
+<p>The runtime is <a href="https://www.npmjs.com/package/browser-llm-nexus">browser-llm-nexus</a>,
+a separate standalone package on npm. Where a model comes from is always something you state —
+nothing is guessed:</p>
+
 <pre>import { NexusChat } from 'browser-llm-nexus';
 
-const nexus = await NexusChat.load('Qwen/Qwen3-0.6B');
-nexus.tool('get_weather', 'Current weather for a city',
-  { city: 'string' },
+const chat = await NexusChat.load({ hub: 'onnx-community/Qwen3-0.6B-ONNX' }); // Hugging Face
+// or { base: '/models/', id: 'Qwen/Qwen3-0.6B' }   — a folder you serve
+// or { archive: fileTheUserPicked }                — a portable zip
+
+chat.tool('get_weather', 'Current weather for a city', { city: 'string' },
   async ({ city }) => fetchWeather(city));
 
-const answer = await nexus.chat('Weather in Chennai?');
-// model calls the tool → your JS runs → grounded answer</pre>
+console.log(await chat.chat('What is the weather in Chennai?'));
+// model emits the tool call → your JS runs → result fed back → grounded answer</pre>
 
-<p class="tag">The full app (conversion needs local compute + model storage) runs locally via <code>task up</code>.
-This page ships the <a href="https://www.npmjs.com/package/browser-llm-nexus">browser-llm-nexus</a> on npm.</p>
+<h2>One thing worth knowing</h2>
+
+<p>Aggressive quantization can destroy tool calling while leaving chat intact. Measured on
+identical prompts: Qwen2.5-0.5B-Instruct emits no tool calls at q4 or q8 but works at fp16,
+while the newer Qwen3-0.6B tool-calls fine at q4. That is why every conversion is verified
+behaviorally rather than assumed — the tool tests the model, then tells you the smallest dtype
+that actually passes.</p>
+
+<footer>
+  MIT licensed · <a href="https://github.com/muthuishere/hf2browser">github.com/muthuishere/hf2browser</a> ·
+  runtime: <a href="https://www.npmjs.com/package/browser-llm-nexus">browser-llm-nexus</a>
+</footer>
+
 </body>
 </html>

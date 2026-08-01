@@ -1,6 +1,13 @@
 # hf2browser
 
+[![release](https://img.shields.io/github/v/release/muthuishere/hf2browser?color=0a66c2)](https://github.com/muthuishere/hf2browser/releases/latest)
+[![ci](https://github.com/muthuishere/hf2browser/actions/workflows/ci.yml/badge.svg)](https://github.com/muthuishere/hf2browser/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+
 **Any Hugging Face LLM → running in the browser on plain CPU, with tool calling.**
+
+🔗 **[Try it in your browser](https://muthuishere.github.io/hf2browser/try/)** — no install; a converted
+model streams from the Hugging Face Hub into the page and calls JavaScript tools you can edit live.
 
 One command gives you: HF Hub search with tool-calling detection → download → ONNX
 conversion + q4 quantization → CPU verification (including a real tool-call test) →
@@ -34,6 +41,7 @@ CPU with the same API. This repo produces models for it; it does not depend on t
 | `verify/` | JavaScript (Node) | behavioral CPU verification: does it generate? does it *actually* emit tool calls? |
 | `demo/` | JavaScript | chat page (GPU or CPU) with a live JS tool editor |
 | `internal/server/standalone.html` | HTML | the generated single-file chat page handed to users |
+| `site/` | HTML | the GitHub Pages landing page and its live in-browser demo |
 
 Why three languages: Go is the product (fast single binary), Python is build-time
 tooling only — the `optimum`/PyTorch export stack is the only thing on earth that can
@@ -47,9 +55,13 @@ by download (accelerated with `hf_transfer`, HF's Rust engine) and native export
 **Run the binary** — nothing to build, nothing to clone:
 
 ```bash
-# grab the one for your platform from the Releases page, then
+# grab the one for your platform from
+# https://github.com/muthuishere/hf2browser/releases/latest — then
 chmod +x hf2browser && ./hf2browser serve
 ```
+
+Binaries are published for macOS (arm64/amd64), Linux (amd64/arm64) and Windows,
+with a `SHA256SUMS` alongside them.
 
 The conversion pipeline, the CPU verifier and the chat page are compiled into the
 executable; it unpacks them into `~/.hf2browser` the first time it runs.
@@ -238,6 +250,14 @@ Compose it with a vector store and you have a full knowledge bundle
 (`NexusKnowledge.exportZip({ includeModels: true })` → one zip, runs air-gapped).
 One engine stack for embeddings *and* chat, GPU when present, CPU when not.
 
+## The landing page
+
+[muthuishere.github.io/hf2browser](https://muthuishere.github.io/hf2browser/) is a static
+site built from `site/` — a short pitch, the download link, and **[a live demo](https://muthuishere.github.io/hf2browser/try/)**
+that runs a converted model in the visitor's own browser, straight from the Hub, with the tool
+loop working. It is not a hosted service: converting needs local compute and disk, so the page
+exists to *show* the result and hand you the binary, not to do the work for you.
+
 ## Layout
 
 ```
@@ -248,7 +268,7 @@ apps/converter/              the converter app
   verify/                      Node CPU verification (generation + tool calls)
   demo/                        browser chat with live JS tool editor
   models/                      converted output (gitignored)
-site/                        GitHub Pages landing
+site/                        GitHub Pages: landing page + try/ live demo
 ```
 
 The browser runtime lives in its own repo:
