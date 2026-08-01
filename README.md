@@ -17,7 +17,7 @@ task up          # build + serve, opens the browser, do everything from there
 |---|---|---|
 | `cmd/hf2browser`, `internal/` | Go | single-binary CLI + web UI/API server, orchestrates everything |
 | `pytools/tjs_scripts/` | Python (auto-managed by `uv`) | the ONNX export + quantization pipeline (build-time only) |
-| `libs/browser-llm-nexus` | JavaScript | browser tool-calling runtime: register JS tools, agentic parse→execute→answer loop |
+| `libs/browser-llm-nexus` | TypeScript | browser library: tool calling, embeddings, RAG, offline bundles, metrics |
 | `verify/` | JavaScript (Node) | behavioral CPU verification: does it generate? does it *actually* emit tool calls? |
 | `demo/` | JavaScript | chat page on the WASM backend with a live JS tool editor |
 
@@ -65,8 +65,12 @@ auto-picks a free one from 8917).
 
 ## browser-llm-nexus — the browser library
 
-```js
-import { NexusChat } from '/libs/browser-llm-nexus';
+TypeScript, hooks-style, npm-ready (`libs/browser-llm-nexus`) — chat + tool calling,
+embeddings, RAG, offline cache bundles, and metrics. Full docs in
+[libs/browser-llm-nexus/README.md](libs/browser-llm-nexus/README.md).
+
+```ts
+import { NexusChat } from 'browser-llm-nexus';
 
 const nexus = await NexusChat.load('Qwen/Qwen3-0.6B');   // auto-picks best dtype
 
@@ -74,12 +78,13 @@ nexus.tool('get_weather', 'Get current weather for a city',
   { city: 'string' },                                     // shorthand JSON schema
   async ({ city }) => (await fetch(`/api/weather?c=${city}`)).json());
 
-const answer = await nexus.chat('What is the weather in Chennai?', {
-  onToken: t => process.stdout.write(t),                  // streaming
-  onToolCall: (call, result) => console.log(call, result),
-});
-// → model emits the tool call → toolnexus runs your handler → feeds the result
-//   back → returns the final grounded answer. Multi-round, multi-tool.
+nexus.on('token', t => render(t));                        // hooks, not callbacks
+nexus.on('toolCall', (call, result) => console.log(call, result));
+
+const answer = await nexus.chat('What is the weather in Chennai?');
+console.log(nexus.metrics.summary());   // tokens/sec, tool_calls_ok, load_ms …
+// → model emits the tool call → your handler runs → result fed back →
+//   final grounded answer. Multi-round, multi-tool.
 ```
 
 - Parses every common tool-call format (Qwen/Hermes `<tool_call>`, Mistral
