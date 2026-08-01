@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/crc32"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	hf2browser "github.com/muthuishere/hf2browser"
 	"github.com/muthuishere/hf2browser/internal/hf"
 	"github.com/muthuishere/hf2browser/internal/pipeline"
 )
@@ -32,15 +34,19 @@ const nexusFallbackVersion = "0.4.2"
 
 // Server wires the HF client and conversion pipeline to HTTP handlers.
 type Server struct {
-	Root string
-	HF   *hf.Client
+	// Root is where the pipeline and verifier live (a checkout, or the
+	// unpacked work directory). Models is where converted models land — the
+	// two are separate so `models_dir` can point anywhere, e.g. a big disk.
+	Root   string
+	Models string
+	HF     *hf.Client
 
 	mu   sync.Mutex // one conversion at a time
 	busy string     // model currently converting, "" if idle
 }
 
-func New(root string, client *hf.Client) *Server {
-	return &Server{Root: root, HF: client}
+func New(root, models string, client *hf.Client) *Server {
+	return &Server{Root: root, Models: models, HF: client}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -58,13 +64,36 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/convert", s.handleConvert) // SSE
 	// Model files are the artifact people take away — a page served from
 	// anywhere else must be able to fetch them, so they are readable cross-origin.
-	mux.Handle("GET /models/", cors(http.StripPrefix("/models/", http.FileServer(http.Dir(s.Root+"/models")))))
-	mux.Handle("GET /demo/", http.StripPrefix("/demo/", http.FileServer(http.Dir(s.Root+"/demo"))))
-	// browser-llm-nexus ships as an npm package; serve it from verify/node_modules
-	// so the demo page loads the same build the CPU verifier uses.
+	mux.Handle("GET /models/", cors(http.StripPrefix("/models/", http.FileServer(http.Dir(s.Models)))))
+	mux.Handle("GET /demo/", http.StripPrefix("/demo/", http.FileServer(s.demoFS())))
+	// browser-llm-nexus ships as an npm package. Serve the installed copy when
+	// there is one — that is the exact build the CPU verifier tested — and fall
+	// back to the CDN, so a downloaded binary needs no npm install to chat.
 	nexusDist := filepath.Join(s.Root, "verify", "node_modules", "browser-llm-nexus", "dist")
-	mux.Handle("GET /nexus/", http.StripPrefix("/nexus/", http.FileServer(http.Dir(nexusDist))))
+	if _, err := os.Stat(nexusDist); err == nil {
+		mux.Handle("GET /nexus/", http.StripPrefix("/nexus/", http.FileServer(http.Dir(nexusDist))))
+	} else {
+		mux.HandleFunc("GET /nexus/", func(w http.ResponseWriter, r *http.Request) {
+			file := strings.TrimPrefix(r.URL.Path, "/nexus/")
+			http.Redirect(w, r, fmt.Sprintf("https://cdn.jsdelivr.net/npm/browser-llm-nexus@%s/dist/%s",
+				s.nexusVersion(), file), http.StatusFound)
+		})
+	}
 	return mux
+}
+
+// demoFS serves the chat page from disk in a checkout — so editing it and
+// reloading is enough — and from the binary otherwise.
+func (s *Server) demoFS() http.FileSystem {
+	onDisk := filepath.Join(s.Root, "demo")
+	if _, err := os.Stat(filepath.Join(onDisk, "index.html")); err == nil {
+		return http.Dir(onDisk)
+	}
+	sub, err := fs.Sub(hf2browser.Demo, "demo")
+	if err != nil {
+		return http.Dir(onDisk)
+	}
+	return http.FS(sub)
 }
 
 // cors marks a response as a public static artifact. Only the read-only model
@@ -126,7 +155,7 @@ func (s *Server) handleLocalModels(w http.ResponseWriter, r *http.Request) {
 	// preference order mirrors the demo: smallest usable first
 	dtypeFiles := [][2]string{{"q4", "model_q4.onnx"}, {"q8", "model_quantized.onnx"}, {"fp16", "model_fp16.onnx"}, {"fp32", "model.onnx"}}
 	out := []localModel{}
-	root := filepath.Join(s.Root, "models")
+	root := s.Models
 	orgs, _ := os.ReadDir(root)
 	for _, org := range orgs {
 		if !org.IsDir() {
@@ -159,7 +188,7 @@ func (s *Server) isConverted(modelID string) bool {
 		return false
 	}
 	for _, f := range []string{"model_q4.onnx", "model_quantized.onnx", "model_fp16.onnx", "model.onnx"} {
-		if _, err := os.Stat(filepath.Join(s.Root, "models", modelID, "onnx", f)); err == nil {
+		if _, err := os.Stat(filepath.Join(s.Models, modelID, "onnx", f)); err == nil {
 			return true
 		}
 	}
@@ -179,7 +208,7 @@ func (s *Server) handleModelZip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dtype := r.URL.Query().Get("dtype")
-	modelDir := filepath.Join(s.Root, "models", model)
+	modelDir := filepath.Join(s.Models, model)
 	if _, err := os.Stat(modelDir); err != nil {
 		writeErr(w, http.StatusNotFound, fmt.Errorf("%s is not converted", model))
 		return
@@ -422,7 +451,7 @@ func (s *Server) handleConvert(w http.ResponseWriter, r *http.Request) {
 		extra = append(extra, "--task", task)
 	}
 	sse.event("status", "converting (downloads the model on first run)")
-	if err := pipeline.Convert(s.Root, sse, model, strings.Split(modes, ","), extra); err != nil {
+	if err := pipeline.Convert(s.Root, s.Models, sse, model, strings.Split(modes, ","), extra); err != nil {
 		sse.event("error", "conversion failed: "+err.Error())
 		return
 	}
@@ -431,7 +460,7 @@ func (s *Server) handleConvert(w http.ResponseWriter, r *http.Request) {
 		verifyTask = "feature-extraction"
 	}
 	sse.event("status", "verifying on CPU")
-	if err := pipeline.Verify(s.Root, sse, model, verifyTask, modes); err != nil {
+	if err := pipeline.Verify(s.Root, s.Models, sse, model, verifyTask, modes); err != nil {
 		sse.event("error", "verification failed: "+err.Error())
 		return
 	}

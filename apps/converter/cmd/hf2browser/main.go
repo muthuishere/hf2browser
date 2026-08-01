@@ -5,6 +5,8 @@
 //	hf2browser convert <model-id> [flags]    check + convert + CPU-verify
 //	hf2browser verify  <model-id> [flags]    CPU-verify an already converted model
 //	hf2browser serve   [flags]               web UI: search → convert → chat
+//	hf2browser init                          write an editable hf2browser.json
+//	hf2browser where                         show the work and models directories
 //
 // Environment: HF_TOKEN (gated/private models), HF_ENDPOINT (hub mirror),
 // HF_TIMEOUT (seconds, API calls).
@@ -17,13 +19,16 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 
+	"github.com/muthuishere/hf2browser/internal/config"
 	"github.com/muthuishere/hf2browser/internal/hf"
 	"github.com/muthuishere/hf2browser/internal/pipeline"
 	"github.com/muthuishere/hf2browser/internal/server"
+	"github.com/muthuishere/hf2browser/internal/workspace"
 )
 
 func usage() {
@@ -33,8 +38,11 @@ func usage() {
   hf2browser convert <model-id> [--modes q8,q4,fp16] [--task auto] [--force] [--skip-verify]
   hf2browser verify  <model-id> [--task text-generation] [--dtypes q4,q8,fp16]
   hf2browser serve   [--port 8917]   (auto-picks a free port; $PORT respected)
+  hf2browser init    [--config path]  write a hf2browser.json you can edit
+  hf2browser where                    print the work and models directories
 
-env: HF_TOKEN (gated models), HF_ENDPOINT (hub mirror), HF_TIMEOUT (seconds)
+Every command accepts --config <path> to point at a hf2browser.json.
+env: HF_TOKEN (gated models — env only, never a config file), HF_ENDPOINT, HF_TIMEOUT
 convert refuses models whose chat template lacks tool-calling support (override with --force).`)
 	os.Exit(1)
 }
@@ -80,6 +88,27 @@ func openBrowser(url string) {
 	_ = cmd.Start()
 }
 
+// extractConfig pulls --config/-config out of the arguments so it can be given
+// anywhere on the line, not just in the position each subcommand expects.
+func extractConfig() string {
+	args := os.Args
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if a == "--config" || a == "-config" {
+			if i+1 < len(args) {
+				os.Args = append(append([]string{}, args[:i]...), args[i+2:]...)
+				return args[i+1]
+			}
+			return ""
+		}
+		if v, ok := strings.CutPrefix(a, "--config="); ok {
+			os.Args = append(append([]string{}, args[:i]...), args[i+1:]...)
+			return v
+		}
+	}
+	return ""
+}
+
 func fatal(format string, a ...any) {
 	fmt.Fprintf(os.Stderr, "error: "+format+"\n", a...)
 	os.Exit(1)
@@ -111,10 +140,52 @@ func main() {
 		usage()
 	}
 	cmd := os.Args[1]
-	client := hf.NewFromEnv()
-	root, err := pipeline.Root()
+
+	// --config may appear anywhere; pull it out before the per-command flags.
+	configPath := extractConfig()
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		fatal("%v", err)
+	}
+	if cfg.HFEndpoint != "" {
+		os.Setenv("HF_ENDPOINT", cfg.HFEndpoint)
+	}
+	if cfg.HFTimeout > 0 && os.Getenv("HF_TIMEOUT") == "" {
+		os.Setenv("HF_TIMEOUT", strconv.Itoa(cfg.HFTimeout))
+	}
+	client := hf.NewFromEnv()
+
+	if cmd == "init" {
+		path := configPath
+		if path == "" {
+			path = config.Name
+		}
+		if err := config.Default().Write(path); err != nil {
+			fatal("%v", err)
+		}
+		fmt.Printf("wrote %s — edit it and rerun\n", path)
+		return
+	}
+
+	// Everything else needs the pipeline on disk: a checkout if we are in one,
+	// otherwise the copies compiled into this binary, unpacked once.
+	root, err := workspace.Prepare(cfg.WorkDir)
+	if err != nil {
+		fatal("%v", err)
+	}
+	cfg.ModelsDir = cfg.ModelsUnder(root)
+	if err := os.MkdirAll(cfg.ModelsDir, 0o755); err != nil {
+		fatal("%v", err)
+	}
+
+	if cmd == "where" {
+		if cfg.Path != "" {
+			fmt.Printf("config:    %s\n", cfg.Path)
+		} else {
+			fmt.Printf("config:    (defaults — run `hf2browser init` to write one)\n")
+		}
+		fmt.Printf("runtime:   %s\n", workspace.Describe(root, cfg.ModelsDir))
+		return
 	}
 
 	switch cmd {
@@ -179,7 +250,7 @@ func main() {
 		}
 		modelID := os.Args[2]
 		fs := flag.NewFlagSet("convert", flag.ExitOnError)
-		modes := fs.String("modes", "q4", "quantization modes (comma-separated); q4 = smallest browser variant")
+		modes := fs.String("modes", cfg.Dtype, "quantization modes (comma-separated); q4 = smallest browser variant")
 		task := fs.String("task", "", "optimum task override (default: auto)")
 		force := fs.Bool("force", false, "convert even without tool-calling support")
 		skipVerify := fs.Bool("skip-verify", false, "skip the CPU generation test")
@@ -197,16 +268,17 @@ func main() {
 			extra = append(extra, "--task", *task)
 		}
 		fmt.Println("\n== converting to ONNX (this downloads the model on first run) ==")
-		if err := pipeline.Convert(root, os.Stdout, modelID, strings.Split(*modes, ","), extra); err != nil {
+		if err := pipeline.Convert(root, cfg.ModelsDir, os.Stdout, modelID, strings.Split(*modes, ","), extra); err != nil {
 			fatal("conversion failed: %v", err)
 		}
 		if !*skipVerify {
 			fmt.Println("\n== verifying on CPU (generation + tool calling per dtype) ==")
-			if err := pipeline.Verify(root, os.Stdout, modelID, "text-generation", *modes); err != nil {
+			if err := pipeline.Verify(root, cfg.ModelsDir, os.Stdout, modelID, "text-generation", *modes); err != nil {
 				fatal("verification failed: %v", err)
 			}
 		}
-		fmt.Printf("\ndone: models/%s (serve it and load with Transformers.js)\n", modelID)
+		fmt.Printf("\ndone: %s\nserve it with `hf2browser serve` and load it with browser-llm-nexus\n",
+			filepath.Join(cfg.ModelsDir, modelID))
 
 	case "verify":
 		if len(os.Args) < 3 {
@@ -217,27 +289,22 @@ func main() {
 		task := fs.String("task", "text-generation", "pipeline task")
 		dtypes := fs.String("dtypes", "q4,q8,fp16", "dtype variants to test (comma-separated)")
 		fs.Parse(os.Args[3:])
-		if err := pipeline.Verify(root, os.Stdout, modelID, *task, *dtypes); err != nil {
+		if err := pipeline.Verify(root, cfg.ModelsDir, os.Stdout, modelID, *task, *dtypes); err != nil {
 			fatal("verification failed: %v", err)
 		}
 
 	case "serve":
 		fs := flag.NewFlagSet("serve", flag.ExitOnError)
-		port := fs.Int("port", 0, "port (default: $PORT, else first free port from 8917)")
-		noOpen := fs.Bool("no-open", false, "do not open the browser automatically")
+		port := fs.Int("port", cfg.Port, "port (default: config/$PORT, else first free port from 8917)")
+		noOpen := fs.Bool("no-open", !cfg.OpenBrowser, "do not open the browser automatically")
 		fs.Parse(os.Args[2:])
-		if *port == 0 {
-			if p, err := strconv.Atoi(os.Getenv("PORT")); err == nil {
-				*port = p
-			}
-		}
 		ln, actualPort, err := listenAuto(*port)
 		if err != nil {
 			fatal("%v", err)
 		}
-		srv := server.New(root, client)
+		srv := server.New(root, cfg.ModelsDir, client)
 		url := fmt.Sprintf("http://localhost:%d/", actualPort)
-		fmt.Printf("UI:     %s\nmodels: %smodels/\n", url, url)
+		fmt.Printf("UI:        %s\nruntime:   %s\n", url, workspace.Describe(root, cfg.ModelsDir))
 		if !*noOpen {
 			openBrowser(url)
 		}

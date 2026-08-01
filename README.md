@@ -4,11 +4,12 @@
 
 One command gives you: HF Hub search with tool-calling detection → download → ONNX
 conversion + q4 quantization → CPU verification (including a real tool-call test) →
-a browser chat where the model calls **your JavaScript tools** — all local, no WebGPU,
-no cloud, no server-side inference.
+a browser chat where the model calls **your JavaScript tools** — all local, no cloud,
+no server-side inference. WebGPU is used when the browser has it and plain CPU/WASM
+when it does not, so nothing here *requires* a GPU.
 
 ```bash
-task up          # build + serve, opens the browser, do everything from there
+./hf2browser serve     # or `task up` from a checkout — build, serve, open the browser
 ```
 
 Then take it with you: every converted model can be downloaded as one portable
@@ -27,10 +28,11 @@ CPU with the same API. This repo produces models for it; it does not depend on t
 | piece | language | job |
 |---|---|---|
 | `cmd/hf2browser`, `internal/` | Go | single-binary CLI + web UI/API server, orchestrates everything |
+| `embed.go` | Go | compiles the pipeline, verifier and demo page into the binary, so a download is the whole product |
 | `pytools/tjs_scripts/` | Python (auto-managed by `uv`) | the ONNX export + quantization pipeline (build-time only) |
 | [`browser-llm-nexus`](https://github.com/muthuishere/browser-llm-nexus) | TypeScript (npm) | the browser runtime this produces models for: tool calling, embeddings, RAG, offline bundles, metrics |
 | `verify/` | JavaScript (Node) | behavioral CPU verification: does it generate? does it *actually* emit tool calls? |
-| `demo/` | JavaScript | chat page on the WASM backend with a live JS tool editor |
+| `demo/` | JavaScript | chat page (GPU or CPU) with a live JS tool editor |
 | `internal/server/standalone.html` | HTML | the generated single-file chat page handed to users |
 
 Why three languages: Go is the product (fast single binary), Python is build-time
@@ -42,13 +44,58 @@ by download (accelerated with `hf_transfer`, HF's Rust engine) and native export
 
 ## Quick start
 
+**Run the binary** — nothing to build, nothing to clone:
+
+```bash
+# grab the one for your platform from the Releases page, then
+chmod +x hf2browser && ./hf2browser serve
+```
+
+The conversion pipeline, the CPU verifier and the chat page are compiled into the
+executable; it unpacks them into `~/.hf2browser` the first time it runs.
+
+**Or build from source:**
+
 ```bash
 git clone https://github.com/muthuishere/hf2browser && cd hf2browser
 task up
 ```
 
-Requirements: Go 1.22+, [`uv`](https://docs.astral.sh/uv/), Node 18+,
-[`task`](https://taskfile.dev). Everything else self-provisions on first run.
+In a checkout the binary uses the checkout — its `models/`, its `pytools/` — so
+editing a file and rerunning is all there is to the dev loop.
+
+Needed only for *converting*: [`uv`](https://docs.astral.sh/uv/) (drives the Python
+export toolchain) and Node 18+ (the CPU verification step). Serving and chatting
+need neither. Building from source additionally needs Go 1.22+ and
+[`task`](https://taskfile.dev).
+
+### Configuration
+
+Optional. `hf2browser init` writes a `hf2browser.json` next to you:
+
+```json
+{
+  "port": 0,                 // 0 = first free port from 8917
+  "open_browser": true,
+  "work_dir": "",            // "" = ~/.hf2browser
+  "models_dir": "",          // "" = models/ beside the pipeline; point it at a big disk
+  "dtype": "q4",             // default quantization
+  "hf_endpoint": "",         // Hugging Face mirror
+  "hf_timeout": 30
+}
+```
+
+It is read from the working directory, then next to the binary, then
+`~/.hf2browser/`; `--config <path>` overrides all three. Precedence is
+**flags > environment > config file > defaults**, so nothing in here can
+override something you said more specifically.
+
+`HF_TOKEN` is deliberately *not* a config field — a token is a secret and stays in
+the environment, never in a file that gets copied around. `HF_ENDPOINT`,
+`HF_TIMEOUT` and `PORT` are also read from the environment.
+
+`hf2browser where` prints which config, work directory and models directory are in
+effect, so none of it has to be guessed.
 
 In the UI that opens:
 
@@ -63,19 +110,22 @@ In the UI that opens:
 4. **Take it anywhere** — every converted model gets a row with `model.zip` (the weights),
    `chat.html` (a self-contained page), and `code` (a snippet for your own app). See below.
 
-### CLI equivalents
+### The CLI
+
+Every command is a subcommand of the binary — there is no second vocabulary of
+build tasks wrapping them:
 
 ```bash
-task search  -- "qwen instruct" --tools-only
-task check   -- Qwen/Qwen3-0.6B
-task convert -- Qwen/Qwen3-0.6B              # gate → export → q4 → CPU verify
-task verify  -- Qwen/Qwen3-0.6B --dtypes q4
-task test                                     # Go test suite
+hf2browser search "qwen instruct" --tools-only
+hf2browser check   Qwen/Qwen3-0.6B
+hf2browser convert Qwen/Qwen3-0.6B           # gate → export → q4 → CPU verify
+hf2browser verify  Qwen/Qwen3-0.6B --dtypes q4
+hf2browser serve                             # the UI
+hf2browser init | where                      # config
 ```
 
-Environment (picked up automatically): `HF_TOKEN` (gated models, never printed),
-`HF_ENDPOINT` (hub mirror), `HF_TIMEOUT` (seconds), `PORT` (serve port; otherwise
-auto-picks a free one from 8917).
+The Taskfile has four entries — `up`, `build`, `test`, `dist` — and exists only to
+build and launch.
 
 ## Running the converted models
 
@@ -123,8 +173,16 @@ tool-calling while leaving chat intact. Measured with identical greedy prompts:
 | Qwen3-0.6B | **tools ✓** | — | broken graph (known float16 converter gap) |
 
 The verify step measures this per model instead of guessing, and recommends the
-smallest dtype that passes. Rule of thumb: prefer newer model generations; Qwen3-0.6B
+smallest dtype that passes. This is also why the chat pages pin the dtype the server
+reports rather than probing for one: probing prefers fp16 on WebGPU, and a broken
+fp16 graph fails inside ONNX Runtime as a bare numeric abort with no usable message. Rule of thumb: prefer newer model generations; Qwen3-0.6B
 q4 (~1 GB) is the current sweet spot for browser tool calling.
+
+**One binary, two modes.** Run it inside a checkout and it uses the checkout —
+`pytools/`, `verify/`, `demo/`, `models/` — so editing a file and rerunning is the
+whole dev loop. Run it anywhere else and it unpacks its embedded copies into
+`~/.hf2browser` (refreshed automatically when the binary changes, left alone when it
+has not). `hf2browser where` says which mode you are in.
 
 **Architecture coverage.** The pinned toolchain (transformers 4.49 era) covers Llama,
 Qwen2, Gemma, Phi, Mistral, SmolLM and ~100 more. Newer architectures (Qwen3, …)

@@ -9,12 +9,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const MODELS = path.join(ROOT, 'models');
 
 const args = process.argv.slice(2);
 const modelId = args[0];
 if (!modelId) {
-  console.error('usage: node verify/verify.mjs <model-id> [--task t] [--dtypes q4,q8,fp16]');
+  console.error('usage: node verify/verify.mjs <model-id> [--task t] [--dtypes q4,q8,fp16] [--models dir]');
   process.exit(1);
 }
 const opt = (name, dflt) => {
@@ -22,6 +21,8 @@ const opt = (name, dflt) => {
   return i !== -1 ? args[i + 1] : dflt;
 };
 const task = opt('task', 'text-generation');
+// Models may live outside this tree (see hf2browser.json's models_dir).
+const MODELS = path.resolve(opt('models', path.join(ROOT, 'models')));
 
 const DTYPE_FILES = { q4: 'model_q4.onnx', q8: 'model_quantized.onnx', fp16: 'model_fp16.onnx', fp32: 'model.onnx' };
 const onnxDir = path.join(MODELS, modelId, 'onnx');

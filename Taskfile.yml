@@ -1,32 +1,28 @@
 version: '3'
 
+# Four tasks. Everything else is a subcommand of the binary itself —
+# `hf2browser search|check|convert|verify|serve|init|where` — so there is no
+# second vocabulary to learn and no wrapper to keep in sync.
+
 tasks:
+  default:
+    desc: "Same as `task up`"
+    cmds:
+      - task: up
+
   up:
-    desc: "THE one command: build, serve, open browser"
+    desc: "THE one command: build, serve, open the browser"
     deps: [build]
     dir: apps/converter
     cmds:
       - ./bin/hf2browser serve
 
   build:
-    desc: Build the Go CLI + install JS deps (browser-llm-nexus from npm)
-    cmds:
-      - task: deps
-      - task: app
-
-  deps:
-    desc: Install JS dependencies (Transformers.js + browser-llm-nexus)
-    dir: apps/converter/verify
-    cmds:
-      - npm install --silent
-    status:
-      - test -d node_modules/browser-llm-nexus
-
-  app:
-    desc: Build the Go CLI to apps/converter/bin/hf2browser
+    desc: Build the single binary (pipeline, verifier and demo are compiled in)
     dir: apps/converter
     cmds:
       - go build -o bin/hf2browser ./cmd/hf2browser
+      - 'echo "built apps/converter/bin/hf2browser — run it from anywhere"'
 
   test:
     desc: Run the Go test suite
@@ -34,42 +30,23 @@ tasks:
     cmds:
       - go test ./...
 
-  search:
-    desc: "Search HF Hub: task search -- <query> [--tools-only]"
-    deps: [app]
+  dist:
+    desc: Cross-compile release binaries into dist/
     dir: apps/converter
+    vars:
+      TARGETS: darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64
     cmds:
-      - ./bin/hf2browser search {{.CLI_ARGS}}
-
-  check:
-    desc: "Inspect a HF model: task check -- <model-id>"
-    deps: [app]
-    dir: apps/converter
-    cmds:
-      - ./bin/hf2browser check {{.CLI_ARGS}}
-
-  convert:
-    desc: "Check + convert + CPU-verify: task convert -- <model-id> [--modes q4] [--force]"
-    deps: [build]
-    dir: apps/converter
-    cmds:
-      - ./bin/hf2browser convert {{.CLI_ARGS}}
-
-  verify:
-    desc: "Verify a converted model on CPU: task verify -- <model-id> [--dtypes q4]"
-    deps: [build]
-    dir: apps/converter
-    cmds:
-      - ./bin/hf2browser verify {{.CLI_ARGS}}
-
-  serve:
-    desc: "Web UI (search → convert → chat) — auto-opens browser"
-    deps: [build]
-    dir: apps/converter
-    cmds:
-      - ./bin/hf2browser serve
+      - rm -rf dist && mkdir -p dist
+      - for: { var: TARGETS, split: ' ' }
+        cmd: |
+          os="${ITEM%/*}"; arch="${ITEM#*/}"
+          ext=""; [ "$os" = "windows" ] && ext=".exe"
+          GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
+            go build -trimpath -ldflags="-s -w" \
+            -o "dist/hf2browser-$os-$arch$ext" ./cmd/hf2browser
+      - ls -lh dist
 
   clean:
-    desc: Remove converted models + build outputs
+    desc: Remove build outputs and converted models
     cmds:
-      - rm -rf apps/converter/models/* apps/converter/bin
+      - rm -rf apps/converter/bin apps/converter/dist apps/converter/models/*

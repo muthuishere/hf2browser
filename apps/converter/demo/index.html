@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Browser CPU LLM chat</title>
+<title>Browser LLM chat</title>
 <style>
   body { font-family: -apple-system, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
   #log { white-space: pre-wrap; background: #f5f5f5; border-radius: 8px; padding: 1rem; min-height: 8rem; }
@@ -15,9 +15,10 @@
 </style>
 </head>
 <body>
-<h2>Browser CPU LLM chat (WASM — no WebGPU needed)</h2>
-<p class="muted">Runs entirely locally from converted models. Tool calling handled by <code>toolnexus.mjs</code> —
-this demo registers a mock <code>get_weather</code> tool.</p>
+<h2>Browser LLM chat — WebGPU when available, CPU/WASM otherwise</h2>
+<p class="muted">Runs entirely locally from converted models, through
+<a href="https://www.npmjs.com/package/browser-llm-nexus">browser-llm-nexus</a>. The tools below are
+real JavaScript, evaluated live.</p>
 <p>
   <label>model <select id="model"><option>loading…</option></select></label>
   <span id="loadinfo" class="muted"></span>
@@ -76,16 +77,25 @@ const log = (m) => $('log').textContent = m;
 const append = (m) => $('log').textContent += m;
 
 let nexus = null;
+let catalog = [];   // /api/models — id, dtype and size of every converted model
 
 async function loadModel(id) {
+  // Use the dtype the server reports rather than probing: on WebGPU the probe
+  // prefers fp16, and fp16 graphs from the float16 converter are frequently
+  // broken (see the README). The server already picked the best usable variant.
+  const dtype = (catalog.find(m => m.id === id) || {}).dtype;
   $('send').disabled = true;
   $('loadinfo').textContent = 'loading…';
-  log(`Loading ${id} on WASM/CPU …`);
+  log(`Loading ${id}${dtype ? ` (${dtype})` : ''} …`);
   if (nexus) { try { await nexus.dispose(); } catch {} nexus = null; }
   const t0 = performance.now();
   try {
-    // Explicit source: this server's /models/ folder. The library assumes nothing.
-    nexus = await NexusChat.load({ base: '/models/', id }, {
+    // Explicit source: this server's model archive endpoint. The library assumes
+    // nothing — and going through the archive means the page loads the model the
+    // same way a page you host elsewhere would, from the same bytes.
+    const archive = `/api/model.zip?model=${encodeURIComponent(id)}${dtype ? `&dtype=${dtype}` : ''}`;
+    nexus = await NexusChat.load({ archive }, {
+      dtype,
       onProgress: (p) => { if (p.status === 'progress' && p.file) log(`Loading ${p.file}: ${Math.round(p.progress || 0)}%`); },
     });
     nexus.on('token', (t) => append(t));
@@ -119,6 +129,7 @@ $('apply').onclick = applyTools;
 async function init() {
   const res = await fetch('/api/models');
   const models = await res.json();
+  catalog = models;
   const sel = $('model');
   if (!models.length) { log('no converted models yet — convert one from the main page first'); sel.innerHTML = ''; return; }
   sel.innerHTML = models.map(m => `<option value="${m.id}">${m.id} (${m.dtype}, ${m.size_mb} MB)</option>`).join('');

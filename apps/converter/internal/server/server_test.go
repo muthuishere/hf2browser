@@ -80,7 +80,9 @@ func readManifest(t *testing.T, zr *zip.Reader) modelManifest {
 
 func newServer(t *testing.T) *Server {
 	t.Helper()
-	return New(t.TempDir(), nil)
+	dir := t.TempDir()
+	// Models live under the work dir by default; writeModel mirrors that.
+	return New(dir, filepath.Join(dir, "models"), nil)
 }
 
 func TestModelZipLayout(t *testing.T) {

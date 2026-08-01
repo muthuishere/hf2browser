@@ -1,0 +1,56 @@
+name: release
+
+# Tag a version and every platform gets a binary people can just run:
+#   git tag v0.2.0 && git push origin v0.2.0
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Test before shipping
+        working-directory: apps/converter
+        run: go test ./...
+
+      - name: Cross-compile
+        working-directory: apps/converter
+        run: |
+          mkdir -p dist
+          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do
+            os="${target%/*}"; arch="${target#*/}"
+            ext=""; [ "$os" = "windows" ] && ext=".exe"
+            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
+              go build -trimpath -ldflags="-s -w" \
+              -o "dist/hf2browser-$os-$arch$ext" ./cmd/hf2browser
+          done
+          (cd dist && sha256sum * > SHA256SUMS)
+          ls -lh dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: apps/converter/dist/*
+          generate_release_notes: true
+          body: |
+            Download the binary for your platform, make it executable, and run it:
+
+            ```bash
+            chmod +x hf2browser-* && ./hf2browser-* serve
+            ```
+
+            The conversion pipeline, the CPU verifier and the chat page are compiled
+            in — the binary unpacks them into `~/.hf2browser` on first run. `hf2browser
+            init` writes a `hf2browser.json` you can edit.
+
+            Converting needs [`uv`](https://docs.astral.sh/uv/) (Python toolchain) and,
+            for the CPU verification step, Node 18+. Serving and chatting need neither.

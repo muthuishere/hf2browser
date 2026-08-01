@@ -12,44 +12,14 @@ import (
 	"strings"
 )
 
-// Root is the repo root (directory containing vendor/tjs_scripts).
-func Root() (string, error) {
-	exe, err := os.Executable()
-	if err == nil {
-		if dir := findRoot(filepath.Dir(exe)); dir != "" {
-			return dir, nil
-		}
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	if dir := findRoot(cwd); dir != "" {
-		return dir, nil
-	}
-	return "", fmt.Errorf("cannot locate repo root (vendor/tjs_scripts) from executable or cwd")
-}
-
-func findRoot(start string) string {
-	dir := start
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "pytools", "tjs_scripts")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
-}
-
 func run(dir string, out io.Writer, name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
-	// hf_transfer = HF's Rust download engine; the biggest time slice for
-	// large models is the weight download, and this saturates bandwidth.
-	cmd.Env = append(os.Environ(), "HF_HUB_ENABLE_HF_TRANSFER=1")
+	// hf_transfer = HF's Rust download engine; the biggest time slice for large
+	// models is the weight download, and this saturates bandwidth.
+	// DONTWRITEBYTECODE keeps __pycache__ out of the pipeline tree, which is
+	// compiled into the binary (see embed.go).
+	cmd.Env = append(os.Environ(), "HF_HUB_ENABLE_HF_TRANSFER=1", "PYTHONDONTWRITEBYTECODE=1")
 	cmd.Stdout = out
 	cmd.Stderr = out
 	fmt.Fprintln(out, "+", name, args)
@@ -64,7 +34,7 @@ func run(dir string, out io.Writer, name string, args ...string) error {
 // It first runs the pinned (battle-tested) dependency set; if that fails
 // because the architecture is newer than the pinned transformers knows,
 // it automatically retries with requirements-modern.txt.
-func Convert(root string, out io.Writer, modelID string, modes []string, extra []string) error {
+func Convert(root, modelsDir string, out io.Writer, modelID string, modes []string, extra []string) error {
 	buildArgs := func(reqs string) []string {
 		args := []string{
 			"run", "--python", "3.11",
@@ -72,7 +42,7 @@ func Convert(root string, out io.Writer, modelID string, modes []string, extra [
 			"python", "-m", "pytools.tjs_scripts.convert",
 			"--model_id", modelID,
 			"--quantize",
-			"--output_parent_dir", filepath.Join(root, "models"),
+			"--output_parent_dir", modelsDir,
 		}
 		if len(modes) > 0 {
 			args = append(args, "--modes")
@@ -91,7 +61,7 @@ func Convert(root string, out io.Writer, modelID string, modes []string, extra [
 		err = run(root, out, "uv", args...)
 	}
 	if err == nil {
-		modelDir := filepath.Join(root, "models", modelID)
+		modelDir := filepath.Join(modelsDir, modelID)
 		if e := inlineChatTemplate(modelDir, out); e != nil {
 			fmt.Fprintf(out, "warning: could not inline chat template: %v\n", e)
 		}
@@ -171,12 +141,13 @@ func inlineChatTemplate(modelDir string, out io.Writer) error {
 
 // Verify loads the converted model with Transformers.js on CPU, checks it
 // generates, and (for text-generation) tests tool calling per dtype variant.
-func Verify(root string, out io.Writer, modelID, task, dtypes string) error {
+func Verify(root, modelsDir string, out io.Writer, modelID, task, dtypes string) error {
 	verifyDir := filepath.Join(root, "verify")
 	if _, err := os.Stat(filepath.Join(verifyDir, "node_modules")); err != nil {
 		if err := run(verifyDir, out, "npm", "install", "--silent"); err != nil {
 			return fmt.Errorf("npm install: %w", err)
 		}
 	}
-	return run(root, out, "node", filepath.Join("verify", "verify.mjs"), modelID, "--task", task, "--dtypes", dtypes)
+	return run(root, out, "node", filepath.Join("verify", "verify.mjs"), modelID,
+		"--task", task, "--dtypes", dtypes, "--models", modelsDir)
 }
