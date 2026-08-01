@@ -37,14 +37,15 @@ functions</strong>. WebGPU when the browser has it, plain CPU when it doesn't. N
 no server-side inference, no API key.</p>
 
 <p>
-  <a class="btn" href="./try/">Try it in this browser →</a>
+  <a class="btn" href="https://muthuishere.github.io/browser-llm-nexus/demo/">Try a model in your browser →</a>
   <a class="btn ghost" href="https://github.com/muthuishere/hf2browser/releases/latest">Download</a>
   <a class="btn ghost" href="https://github.com/muthuishere/hf2browser">GitHub</a>
 </p>
 
-<p class="tag">The <a href="./try/">live demo</a> needs no install — it streams a converted model
-straight from the Hugging Face Hub into this page. To convert your <em>own</em> models, run the
-binary locally.</p>
+<p class="tag">Running converted models is the
+<a href="https://muthuishere.github.io/browser-llm-nexus/demo/">browser-llm-nexus demo</a>'s job — chat, tool calls, copy-paste code, no install.
+hf2browser's job is upstream of that: find a model, convert it, and hand over a URL or a zip you
+can drop into that page or your own.</p>
 
 <h2>Run it</h2>
 
@@ -67,7 +68,7 @@ macOS arm64/amd64, Linux amd64/arm64, Windows.</p>
   <div class="card"><h3>Search with tool-calling detection</h3><p>Live Hub search flags which models can actually call tools, with download-size estimates before you commit.</p></div>
   <div class="card"><h3>One-command conversion</h3><p>ONNX export + q4 quantization, streamed live. New architectures auto-retry with a modern toolchain.</p></div>
   <div class="card"><h3>Verified, not assumed</h3><p>Every conversion is behaviorally tested on CPU — including whether it really emits schema-valid tool calls.</p></div>
-  <div class="card"><h3>Then take it anywhere</h3><p>Each model exports as a portable <code>model.zip</code> and a single self-contained <code>chat.html</code> you can host anywhere.</p></div>
+  <div class="card"><h3>Then hand it over</h3><p>One click opens the converted model in the <a href="https://muthuishere.github.io/browser-llm-nexus/demo/">nexus demo</a>, or take the URL, the zip, or a self-contained <code>chat.html</code> elsewhere.</p></div>
 </div>
 
 <h2>What you get out</h2>

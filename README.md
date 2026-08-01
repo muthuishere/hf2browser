@@ -6,8 +6,8 @@
 
 **Any Hugging Face LLM → running in the browser on plain CPU, with tool calling.**
 
-🔗 **[Try it in your browser](https://muthuishere.github.io/hf2browser/try/)** — no install; a converted
-model streams from the Hugging Face Hub into the page and calls JavaScript tools you can edit live.
+🔗 **[Try a model in your browser](https://muthuishere.github.io/browser-llm-nexus/demo/)** — the browser-llm-nexus demo runs converted
+models with tool calling, no install. hf2browser is what produces the models it runs.
 
 One command gives you: HF Hub search with tool-calling detection → download → ONNX
 conversion + q4 quantization → CPU verification (including a real tool-call test) →
@@ -39,9 +39,8 @@ CPU with the same API. This repo produces models for it; it does not depend on t
 | `pytools/tjs_scripts/` | Python (auto-managed by `uv`) | the ONNX export + quantization pipeline (build-time only) |
 | [`browser-llm-nexus`](https://github.com/muthuishere/browser-llm-nexus) | TypeScript (npm) | the browser runtime this produces models for: tool calling, embeddings, RAG, offline bundles, metrics |
 | `verify/` | JavaScript (Node) | behavioral CPU verification: does it generate? does it *actually* emit tool calls? |
-| `demo/` | JavaScript | chat page (GPU or CPU) with a live JS tool editor |
 | `internal/server/standalone.html` | HTML | the generated single-file chat page handed to users |
-| `site/` | HTML | the GitHub Pages landing page and its live in-browser demo |
+| `site/` | HTML | the GitHub Pages landing page |
 
 Why three languages: Go is the product (fast single binary), Python is build-time
 tooling only — the `optimum`/PyTorch export stack is the only thing on earth that can
@@ -138,11 +137,21 @@ In the UI that opens:
    tool-calling only, cap by size, click column headers to sort.
 2. **Convert** — streams the whole pipeline log live (SSE). Default output is **q4
    only** — the smallest browser variant; larger intermediates are pruned automatically.
-3. **Chat** — converted models show a Chat button. The chat page auto-loads the best
-   dtype and has a **live JS tool editor**: write tools in real JavaScript, hit Apply,
-   and the model calls them.
-4. **Take it anywhere** — every converted model gets a row with `model.zip` (the weights),
-   `chat.html` (a self-contained page), and `code` (a snippet for your own app). See below.
+3. **Hand it over** — every converted model gets a row with **Open in demo** (opens the
+   [browser-llm-nexus demo](https://muthuishere.github.io/browser-llm-nexus/demo/) with this model's URL already filled in), **copy URL**,
+   `model.zip`, a self-contained `chat.html`, and `code` for your own app.
+
+Running the model is deliberately not this tool's UI. The demo already does chat, tool
+calling and copy-paste code properly; duplicating it here would mean two of everything.
+
+**On the hand-off:** the model endpoints are readable cross-origin, so a page anywhere can
+fetch them. When that page is hosted (https) and your converter is on `localhost`, the
+browser treats it as a public→loopback request and asks the user for local-network
+permission — allow it once and the demo loads straight from your machine. If it is declined,
+or the browser has no such prompt, download `model.zip` and use the demo's *Archive file*
+tab; the result is identical. The server sends `Access-Control-Allow-Private-Network` for
+the older preflight-based opt-in too, though in testing the browser permission was the
+deciding factor, not the header.
 
 ### The CLI
 
@@ -213,7 +222,7 @@ fp16 graph fails inside ONNX Runtime as a bare numeric abort with no usable mess
 q4 (~1 GB) is the current sweet spot for browser tool calling.
 
 **One binary, two modes.** Run it inside a checkout and it uses the checkout —
-`pytools/`, `verify/`, `demo/`, `models/` — so editing a file and rerunning is the
+`pytools/`, `verify/`, `models/` — so editing a file and rerunning is the
 whole dev loop. Run it anywhere else and it unpacks its embedded copies into
 `~/.hf2browser` (refreshed automatically when the binary changes, left alone when it
 has not). `hf2browser where` says which mode you are in.
@@ -275,10 +284,10 @@ One engine stack for embeddings *and* chat, GPU when present, CPU when not.
 ## The landing page
 
 [muthuishere.github.io/hf2browser](https://muthuishere.github.io/hf2browser/) is a static
-site built from `site/` — a short pitch, the download link, and **[a live demo](https://muthuishere.github.io/hf2browser/try/)**
-that runs a converted model in the visitor's own browser, straight from the Hub, with the tool
-loop working. It is not a hosted service: converting needs local compute and disk, so the page
-exists to *show* the result and hand you the binary, not to do the work for you.
+site built from `site/` — what it is, the install line, and a link to the
+[nexus demo](https://muthuishere.github.io/browser-llm-nexus/demo/) for anyone who wants to see a converted model run before installing
+anything. It is not a hosted service: converting needs local compute and disk, so the page
+exists to explain and to hand you the binary.
 
 ## Layout
 
@@ -288,9 +297,8 @@ apps/converter/              the converter app
   internal/hf|pipeline|server  HF API, orchestration, web UI + JSON/SSE API
   pytools/tjs_scripts/         vendored conversion pipeline (Python, build-time)
   verify/                      Node CPU verification (generation + tool calls)
-  demo/                        browser chat with live JS tool editor
   models/                      converted output (gitignored)
-site/                        GitHub Pages: landing page + try/ live demo
+site/                        GitHub Pages landing page
 ```
 
 The browser runtime lives in its own repo:

@@ -325,3 +325,36 @@ func TestModelArtifactsAreCrossOriginReadable(t *testing.T) {
 		}
 	}
 }
+
+// A page on another origin — the browser-llm-nexus demo, a static host — must be
+// able to fetch a model from a converter running on localhost. Chrome calls that
+// a public→loopback request and blocks it unless the server opts in.
+func TestPrivateNetworkPreflight(t *testing.T) {
+	srv := newServer(t)
+	writeModel(t, srv.Root, "acme/tiny", map[string]string{"onnx/model_q4.onnx": "Q4"})
+
+	for _, target := range []string{"/api/model.zip?model=acme/tiny", "/models/acme/tiny/onnx/model_q4.onnx"} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodOptions, target, nil)
+		req.Header.Set("Origin", "https://muthuishere.github.io")
+		req.Header.Set("Access-Control-Request-Method", "GET")
+		req.Header.Set("Access-Control-Request-Private-Network", "true")
+		srv.Handler().ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNoContent {
+			t.Errorf("%s preflight: status = %d, want 204", target, rec.Code)
+		}
+		if got := rec.Header().Get("Access-Control-Allow-Private-Network"); got != "true" {
+			t.Errorf("%s preflight: Allow-Private-Network = %q, want true", target, got)
+		}
+		if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+			t.Errorf("%s preflight: Allow-Origin = %q", target, got)
+		}
+	}
+
+	// The header must be on the real response too, not only the preflight.
+	rec := get(t, srv, "/api/model.zip?model=acme/tiny", http.StatusOK)
+	if got := rec.Header().Get("Access-Control-Allow-Private-Network"); got != "true" {
+		t.Errorf("GET: Allow-Private-Network = %q, want true", got)
+	}
+}

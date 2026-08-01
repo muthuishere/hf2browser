@@ -36,7 +36,8 @@
 </head>
 <body>
 <h2>LLM Browser Converter</h2>
-<p class="muted">Search Hugging Face → download &amp; convert to CPU/WASM ONNX → chat with it in the browser. Models without a tool-calling chat template are flagged.</p>
+<p class="muted">Search Hugging Face → download → convert to browser ONNX → hand the result to any page.
+Models without a tool-calling chat template are flagged before you spend the download.</p>
 
 <div id="searchbar">
   <input id="q" placeholder="search models… (e.g. qwen instruct)" />
@@ -83,15 +84,20 @@
 <div id="log"></div>
 
 <section id="ship" hidden>
-  <h3>Take it anywhere</h3>
-  <p class="muted">Models you have already converted. Each one is a plain static artifact —
-    download the weights, download a single self-contained HTML page, or point your own app at
-    <a href="https://www.npmjs.com/package/browser-llm-nexus" target="_blank">browser-llm-nexus</a>.
-    Nothing at runtime talks back to this server.</p>
+  <h3>Converted — take it anywhere</h3>
+  <p class="muted">Each model is a plain static artifact. <strong>Open in demo</strong> hands the URL
+    straight to the <a href="https://muthuishere.github.io/browser-llm-nexus/demo/" target="_blank">browser-llm-nexus
+    demo</a>, where you can chat with it, call tools and copy working code — or take the URL and the
+    zip somewhere else entirely. Nothing at runtime talks back to this server.</p>
   <table id="shiptable">
-    <thead><tr><th>model</th><th>dtype</th><th>size</th><th>run here</th><th>take with you</th></tr></thead>
+    <thead><tr><th>model</th><th>dtype</th><th>size</th><th>hand it over</th><th>files</th></tr></thead>
     <tbody></tbody>
   </table>
+  <p class="muted" id="copystatus"></p>
+  <p class="muted">Opening a model that lives on <code>localhost</code> from a page hosted elsewhere
+    makes your browser ask permission to reach your local network — allow it once and the demo
+    loads straight from here. Declined it, or on a browser that won't? Download the
+    <code>model.zip</code> and drop it into the demo's <em>Archive file</em> tab instead; same result.</p>
   <details id="snippet">
     <summary>Use it from your own page (<code>npm i browser-llm-nexus</code>)</summary>
     <pre id="snippetcode"></pre>
@@ -172,9 +178,9 @@ function render() {
       r.tools === 'no' ? '<span class="badge tools-no">no tools</span>' :
       r.tools === 'n/a' ? '<span class="muted">n/a</span>' :
       r.tools === 'unknown' ? '?' : '…';
-    const action = r.converted && r.tools !== 'n/a'
-      ? `<a href="/demo/?model=${encodeURIComponent(r.id)}" target="_blank"><button class="primary">Chat</button></a>`
-      : `<button ${r.tools === 'pending' ? 'disabled' : ''}>${r.converted ? 'Ready' : 'Convert'}</button>`;
+    const action = r.converted
+      ? '<span class="badge tools-yes">converted ↓</span>'
+      : `<button ${r.tools === 'pending' ? 'disabled' : ''}>Convert</button>`;
     tr.innerHTML = `<td><a href="https://huggingface.co/${r.id}" target="_blank">${r.id}</a></td>
       <td>${fmtP(r.params)}</td>
       <td class="muted">${fmtSize(r.params)}</td>
@@ -182,7 +188,7 @@ function render() {
       <td>${toolsCell}</td>
       <td>${action}</td>`;
     const btn = tr.querySelector('button');
-    if (!(r.converted && r.tools !== 'n/a')) btn.onclick = () => {
+    if (btn) btn.onclick = () => {
       if (r.tools === 'n/a') return convert(r.id, false, 'feature-extraction');
       convert(r.id, r.tools !== 'yes');
     };
@@ -218,20 +224,24 @@ function convert(id, needsForce, task) {
     es.close(); converting = false;
   });
   es.addEventListener('done', (e) => {
-    if (task === 'feature-extraction') {
-      $('status').textContent = 'done — ' + e.data + ' converted (embedding model, ready under /models/)';
-    } else {
-      const url = '/demo/?model=' + encodeURIComponent(e.data);
-      $('status').innerHTML = `done — <a href="${url}" target="_blank">chat with ${e.data} in your browser (CPU/WASM)</a>`;
-    }
+    $('status').textContent = `done — ${e.data} is ready below: open it in the demo, copy its URL, or download the zip`;
     es.close(); converting = false;
     loadLocal();   // the new model is now shippable
   });
 }
 
 // ── "Take it anywhere": what to do with a model once it is converted ──────────
+// Chatting is not this tool's job — the browser-llm-nexus demo already does it,
+// and does it better. This page's job is to produce the artifact and hand over
+// its URL. Absolute, because the demo runs on another origin.
+const NEXUS_DEMO = 'https://muthuishere.github.io/browser-llm-nexus/demo/';
+const archiveURL = (m) =>
+  `${location.origin}/api/model.zip?model=${encodeURIComponent(m.id)}&dtype=${m.dtype}`;
+const demoURL = (m) =>
+  `${NEXUS_DEMO}?archive=${encodeURIComponent(archiveURL(m))}&dtype=${m.dtype}&name=${encodeURIComponent(m.id)}`;
+
 function snippetFor(m) {
-  const zip = `${location.origin}/api/model.zip?model=${encodeURIComponent(m.id)}&dtype=${m.dtype}`;
+  const zip = archiveURL(m);
   return `import { NexusChat } from 'browser-llm-nexus';
 
 // the archive this server serves — a URL, or a File the user picked
@@ -256,14 +266,26 @@ async function loadLocal() {
   for (const m of models) {
     const q = encodeURIComponent(m.id);
     const tr = document.createElement('tr');
+    const archive = archiveURL(m);
     tr.innerHTML = `<td>${m.id}</td><td>${m.dtype}</td><td class="muted">${m.size_mb} MB</td>
-      <td><a href="/demo/?model=${q}" target="_blank">chat</a></td>
       <td>
-        <a href="/api/model.zip?model=${q}&dtype=${m.dtype}">model.zip</a>
+        <a href="${demoURL(m)}" target="_blank"><button class="primary">Open in demo</button></a>
+        <a href="#" class="copy">copy URL</a>
+      </td>
+      <td>
+        <a href="${archive}">model.zip</a>
         <a href="/api/standalone.html?model=${q}&dtype=${m.dtype}">chat.html</a>
-        <a href="/api/standalone.html?model=${q}&dtype=${m.dtype}&inline=1" target="_blank">preview</a>
         <a href="#" class="code">code</a>
       </td>`;
+    tr.querySelector('.copy').onclick = async (e) => {
+      e.preventDefault();
+      try {
+        await navigator.clipboard.writeText(archive);
+        $('copystatus').textContent = `copied ${archive}`;
+      } catch {
+        $('copystatus').textContent = archive;
+      }
+    };
     tr.querySelector('.code').onclick = (e) => {
       e.preventDefault();
       $('snippetcode').textContent = snippetFor(m);

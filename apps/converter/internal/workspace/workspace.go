@@ -73,7 +73,7 @@ func findSource() string {
 
 // sources are the embedded trees, unpacked with their paths preserved.
 func sources() []fs.FS {
-	return []fs.FS{hf2browser.PyTools, hf2browser.Verify, hf2browser.Demo}
+	return []fs.FS{hf2browser.PyTools, hf2browser.Verify}
 }
 
 // unpack writes the embedded assets into dir unless they are already current.

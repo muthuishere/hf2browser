@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/crc32"
-	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	hf2browser "github.com/muthuishere/hf2browser"
 	"github.com/muthuishere/hf2browser/internal/hf"
 	"github.com/muthuishere/hf2browser/internal/pipeline"
 )
@@ -62,47 +60,43 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/model.zip", s.handleModelZip)
 	mux.HandleFunc("GET /api/standalone.html", s.handleStandalone)
 	mux.HandleFunc("GET /api/convert", s.handleConvert) // SSE
+	// Preflights for the two endpoints a page on another origin may fetch.
+	mux.HandleFunc("OPTIONS /api/model.zip", handlePreflight)
+	mux.HandleFunc("OPTIONS /models/", handlePreflight)
 	// Model files are the artifact people take away — a page served from
 	// anywhere else must be able to fetch them, so they are readable cross-origin.
 	mux.Handle("GET /models/", cors(http.StripPrefix("/models/", http.FileServer(http.Dir(s.Models)))))
-	mux.Handle("GET /demo/", http.StripPrefix("/demo/", http.FileServer(s.demoFS())))
-	// browser-llm-nexus ships as an npm package. Serve the installed copy when
-	// there is one — that is the exact build the CPU verifier tested — and fall
-	// back to the CDN, so a downloaded binary needs no npm install to chat.
-	nexusDist := filepath.Join(s.Root, "verify", "node_modules", "browser-llm-nexus", "dist")
-	if _, err := os.Stat(nexusDist); err == nil {
-		mux.Handle("GET /nexus/", http.StripPrefix("/nexus/", http.FileServer(http.Dir(nexusDist))))
-	} else {
-		mux.HandleFunc("GET /nexus/", func(w http.ResponseWriter, r *http.Request) {
-			file := strings.TrimPrefix(r.URL.Path, "/nexus/")
-			http.Redirect(w, r, fmt.Sprintf("https://cdn.jsdelivr.net/npm/browser-llm-nexus@%s/dist/%s",
-				s.nexusVersion(), file), http.StatusFound)
-		})
-	}
 	return mux
-}
-
-// demoFS serves the chat page from disk in a checkout — so editing it and
-// reloading is enough — and from the binary otherwise.
-func (s *Server) demoFS() http.FileSystem {
-	onDisk := filepath.Join(s.Root, "demo")
-	if _, err := os.Stat(filepath.Join(onDisk, "index.html")); err == nil {
-		return http.Dir(onDisk)
-	}
-	sub, err := fs.Sub(hf2browser.Demo, "demo")
-	if err != nil {
-		return http.Dir(onDisk)
-	}
-	return http.FS(sub)
 }
 
 // cors marks a response as a public static artifact. Only the read-only model
 // endpoints use it — search and convert stay same-origin.
+//
+// Access-Control-Allow-Private-Network is the opt-in for Private Network
+// Access: a page on https://example.github.io fetching http://localhost is a
+// public→loopback request, which Chrome blocks by default. Without this header
+// a hosted page (the browser-llm-nexus demo, say) cannot load a model from a
+// converter running on the user's own machine — which is the whole hand-off.
 func cors(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		setCORS(w)
 		h.ServeHTTP(w, r)
 	})
+}
+
+func setCORS(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Access-Control-Allow-Origin", "*")
+	h.Set("Access-Control-Allow-Private-Network", "true")
+	h.Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+	h.Set("Access-Control-Allow-Headers", "*")
+}
+
+// handlePreflight answers the CORS/PNA preflight for the model endpoints.
+func handlePreflight(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	w.Header().Set("Access-Control-Max-Age", "600")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -254,7 +248,7 @@ func (s *Server) handleModelZip(w http.ResponseWriter, r *http.Request) {
 	sort.Strings(paths)
 
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Access-Control-Allow-Origin", "*") // a page hosted elsewhere must be able to fetch it
+	setCORS(w) // a page hosted elsewhere must be able to fetch it
 	w.Header().Set("Content-Disposition",
 		fmt.Sprintf("attachment; filename=%q", strings.ReplaceAll(model, "/", "_")+".zip"))
 

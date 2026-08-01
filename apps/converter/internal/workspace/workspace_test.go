@@ -20,7 +20,6 @@ func TestUnpackProducesARunnableTree(t *testing.T) {
 		"pytools/tjs_scripts/requirements-modern.txt",
 		"verify/verify.mjs",
 		"verify/package.json",
-		"demo/index.html",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(want))); err != nil {
 			t.Errorf("missing %s: %v", want, err)
