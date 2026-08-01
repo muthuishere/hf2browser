@@ -51,9 +51,17 @@ binary locally.</p>
 <p>One executable. The Python export pipeline, the CPU verifier and the chat UI are compiled
 in, so there is nothing to clone and nothing to build:</p>
 
-<pre># download the binary for your platform from Releases, then
-chmod +x hf2browser && ./hf2browser serve
-#  → opens the UI: search the Hub → convert → chat, all local</pre>
+<pre>curl -fsSL https://raw.githubusercontent.com/muthuishere/hf2browser/main/install.sh | sh
+hf2browser serve   # opens the UI: search the Hub → convert → chat, all local</pre>
+
+<p class="tag">Windows (PowerShell):</p>
+<pre>irm https://raw.githubusercontent.com/muthuishere/hf2browser/main/install.ps1 | iex
+hf2browser serve</pre>
+
+<p class="tag">The installer picks the binary for your platform, checks it against the release
+<code>SHA256SUMS</code>, and puts it on your PATH. Or take the file straight from
+<a href="https://github.com/muthuishere/hf2browser/releases/latest">Releases</a> —
+macOS arm64/amd64, Linux amd64/arm64, Windows.</p>
 
 <div class="grid">
   <div class="card"><h3>Search with tool-calling detection</h3><p>Live Hub search flags which models can actually call tools, with download-size estimates before you commit.</p></div>

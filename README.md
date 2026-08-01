@@ -52,16 +52,38 @@ by download (accelerated with `hf_transfer`, HF's Rust engine) and native export
 
 ## Quick start
 
-**Run the binary** — nothing to build, nothing to clone:
+**Install it** — one line, nothing to build, nothing to clone:
 
 ```bash
-# grab the one for your platform from
-# https://github.com/muthuishere/hf2browser/releases/latest — then
+curl -fsSL https://raw.githubusercontent.com/muthuishere/hf2browser/main/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/muthuishere/hf2browser/main/install.ps1 | iex
+```
+
+It picks the binary for your platform, verifies it against the release
+`SHA256SUMS`, and installs it to `~/.local/bin` (`%LOCALAPPDATA%\hf2browser` on
+Windows). Set `HF2BROWSER_BIN_DIR` to put it elsewhere, or `HF2BROWSER_VERSION=v0.1.1`
+to pin a version.
+
+Prefer to grab the file yourself — `curl`, `wget` or a browser all work:
+
+```bash
+# macOS (Apple silicon) — swap in darwin-amd64, linux-amd64, linux-arm64 as needed
+curl -fsSL -o hf2browser https://github.com/muthuishere/hf2browser/releases/latest/download/hf2browser-darwin-arm64
 chmod +x hf2browser && ./hf2browser serve
 ```
 
-Binaries are published for macOS (arm64/amd64), Linux (amd64/arm64) and Windows,
-with a `SHA256SUMS` alongside them.
+```powershell
+# Windows
+curl.exe -fsSL -o hf2browser.exe https://github.com/muthuishere/hf2browser/releases/latest/download/hf2browser-windows-amd64.exe
+.\hf2browser.exe serve
+```
+
+Every asset is listed on the [latest release](https://github.com/muthuishere/hf2browser/releases/latest)
+with a `SHA256SUMS` beside it.
 
 The conversion pipeline, the CPU verifier and the chat page are compiled into the
 executable; it unpacks them into `~/.hf2browser` the first time it runs.

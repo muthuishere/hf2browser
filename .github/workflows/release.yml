@@ -42,11 +42,17 @@ jobs:
           files: apps/converter/dist/*
           generate_release_notes: true
           body: |
-            Download the binary for your platform, make it executable, and run it:
-
             ```bash
-            chmod +x hf2browser-* && ./hf2browser-* serve
+            curl -fsSL https://raw.githubusercontent.com/muthuishere/hf2browser/main/install.sh | sh
+            hf2browser serve
             ```
+
+            ```powershell
+            irm https://raw.githubusercontent.com/muthuishere/hf2browser/main/install.ps1 | iex
+            ```
+
+            Or download an asset below and run it directly (`chmod +x` first on
+            macOS/Linux). Checksums are in `SHA256SUMS`.
 
             The conversion pipeline, the CPU verifier and the chat page are compiled
             in — the binary unpacks them into `~/.hf2browser` on first run. `hf2browser
