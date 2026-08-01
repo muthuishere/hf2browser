@@ -90,11 +90,12 @@ async function loadModel(id) {
   if (nexus) { try { await nexus.dispose(); } catch {} nexus = null; }
   const t0 = performance.now();
   try {
-    // Explicit source: this server's model archive endpoint. The library assumes
-    // nothing — and going through the archive means the page loads the model the
-    // same way a page you host elsewhere would, from the same bytes.
-    const archive = `/api/model.zip?model=${encodeURIComponent(id)}${dtype ? `&dtype=${dtype}` : ''}`;
-    nexus = await NexusChat.load({ archive }, {
+    // Explicit source: this server's models/ folder. The library assumes nothing.
+    // Not the /api/model.zip archive — that copies the whole model into the Cache
+    // API, which is the right trade for a page hosted elsewhere (see the generated
+    // chat.html) but pointless here, and it hard-fails where CacheStorage refuses
+    // a write of that size.
+    nexus = await NexusChat.load({ base: '/models/', id }, {
       dtype,
       onProgress: (p) => { if (p.status === 'progress' && p.file) log(`Loading ${p.file}: ${Math.round(p.progress || 0)}%`); },
     });

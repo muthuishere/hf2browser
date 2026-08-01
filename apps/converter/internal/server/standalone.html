@@ -133,8 +133,16 @@ async function load(source) {
     out('Ready. Ask anything — weather questions exercise the tool loop.');
     $('send').disabled = false;
   } catch (e) {
-    out('Could not load the model: ' + e.message +
-        '\n\nIf this page is open over file://, serve it instead (python3 -m http.server).');
+    const msg = String(e && e.message || e);
+    // Two failures are common enough to name, because the raw message doesn't
+    // tell you what to do about either.
+    const hint = /Cache/i.test(msg)
+      ? '\n\nThis browser refused to store the model in the Cache API — some profiles ' +
+        '(private windows, automated browsers, tight storage quotas) cap entry size. ' +
+        'Serve the model folder instead and switch SOURCE to ' +
+        "{ base: './models/', id: '__MODEL_ID__' }, or use a smaller dtype."
+      : '\n\nIf this page is open over file://, serve it instead (python3 -m http.server).';
+    out('Could not load the model: ' + msg + hint);
   }
 }
 
