@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,6 +22,13 @@ import (
 
 //go:embed ui.html
 var uiHTML []byte
+
+//go:embed standalone.html
+var standaloneHTML []byte
+
+// nexusFallbackVersion is used when the installed package can't be read; the
+// generated page pins a version so it keeps working after a breaking release.
+const nexusFallbackVersion = "0.4.2"
 
 // Server wires the HF client and conversion pipeline to HTTP handlers.
 type Server struct {
@@ -46,14 +54,26 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/models", s.handleLocalModels)
 	mux.HandleFunc("GET /api/tools", s.handleTools)
 	mux.HandleFunc("GET /api/model.zip", s.handleModelZip)
+	mux.HandleFunc("GET /api/standalone.html", s.handleStandalone)
 	mux.HandleFunc("GET /api/convert", s.handleConvert) // SSE
-	mux.Handle("GET /models/", http.StripPrefix("/models/", http.FileServer(http.Dir(s.Root+"/models"))))
+	// Model files are the artifact people take away — a page served from
+	// anywhere else must be able to fetch them, so they are readable cross-origin.
+	mux.Handle("GET /models/", cors(http.StripPrefix("/models/", http.FileServer(http.Dir(s.Root+"/models")))))
 	mux.Handle("GET /demo/", http.StripPrefix("/demo/", http.FileServer(http.Dir(s.Root+"/demo"))))
 	// browser-llm-nexus ships as an npm package; serve it from verify/node_modules
 	// so the demo page loads the same build the CPU verifier uses.
 	nexusDist := filepath.Join(s.Root, "verify", "node_modules", "browser-llm-nexus", "dist")
 	mux.Handle("GET /nexus/", http.StripPrefix("/nexus/", http.FileServer(http.Dir(nexusDist))))
 	return mux
+}
+
+// cors marks a response as a public static artifact. Only the read-only model
+// endpoints use it — search and convert stay same-origin.
+func cors(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		h.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -187,11 +207,7 @@ func (s *Server) handleModelZip(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The origin the browser will request these from, so cached URLs match.
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	root := fmt.Sprintf("%s://%s/models/%s/", scheme, r.Host, model)
+	root := fmt.Sprintf("%s/models/%s/", origin(r), model)
 
 	var paths []string
 	for _, f := range []string{
@@ -209,6 +225,7 @@ func (s *Server) handleModelZip(w http.ResponseWriter, r *http.Request) {
 	sort.Strings(paths)
 
 	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Access-Control-Allow-Origin", "*") // a page hosted elsewhere must be able to fetch it
 	w.Header().Set("Content-Disposition",
 		fmt.Sprintf("attachment; filename=%q", strings.ReplaceAll(model, "/", "_")+".zip"))
 
@@ -244,6 +261,80 @@ func (s *Server) handleModelZip(w http.ResponseWriter, r *http.Request) {
 	if fw, err := zw.Create("manifest.json"); err == nil {
 		fw.Write(body)
 	}
+}
+
+// origin is the scheme+host the browser reached this server on, so URLs we bake
+// into archives and generated pages point back at the same place.
+func origin(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
+}
+
+// nexusVersion reports the browser-llm-nexus version installed for the CPU
+// verifier, so a generated page pins the exact runtime this repo tested with.
+func (s *Server) nexusVersion() string {
+	data, err := os.ReadFile(filepath.Join(s.Root, "verify", "node_modules", "browser-llm-nexus", "package.json"))
+	if err != nil {
+		return nexusFallbackVersion
+	}
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(data, &pkg) != nil || pkg.Version == "" {
+		return nexusFallbackVersion
+	}
+	return pkg.Version
+}
+
+// handleStandalone generates a single, self-contained HTML chat page for a
+// converted model: browser-llm-nexus from a CDN, the model from this server's
+// /api/model.zip (or a file the visitor picks). No build step, no framework,
+// nothing of ours at runtime — drop it on any static host.
+//
+//	GET /api/standalone.html?model=<id>[&dtype=q4][&inline=1]
+func (s *Server) handleStandalone(w http.ResponseWriter, r *http.Request) {
+	model := r.URL.Query().Get("model")
+	if model == "" || strings.Contains(model, "..") {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("valid model required"))
+		return
+	}
+	if !s.isConverted(model) {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("%s is not converted", model))
+		return
+	}
+
+	archive := origin(r) + "/api/model.zip?model=" + url.QueryEscape(model)
+	dtypeOption := ""
+	if dtype := r.URL.Query().Get("dtype"); dtype != "" {
+		// Allowlist, not escaping: this value is interpolated into the page's
+		// JavaScript, so only the four names the runtime knows may get through.
+		switch dtype {
+		case "q4", "q8", "fp16", "fp32":
+		default:
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("unknown dtype %q", dtype))
+			return
+		}
+		archive += "&dtype=" + url.QueryEscape(dtype)
+		dtypeOption = "dtype: '" + dtype + "'"
+	}
+
+	page := strings.NewReplacer(
+		"__MODEL_ID__", model,
+		"__ARCHIVE_URL__", archive,
+		"__DTYPE_OPTION__", dtypeOption,
+		"__NEXUS_VERSION__", s.nexusVersion(),
+	).Replace(string(standaloneHTML))
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if r.URL.Query().Get("inline") != "1" {
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q",
+			strings.ReplaceAll(model, "/", "_")+"-chat.html"))
+	}
+	fmt.Fprint(w, page)
 }
 
 func (s *Server) handleTools(w http.ResponseWriter, r *http.Request) {

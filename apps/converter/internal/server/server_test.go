@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -221,5 +222,104 @@ func TestLocalModelsListing(t *testing.T) {
 	}
 	if dtypes["acme/tiny"] != "q4" || dtypes["acme/big"] != "fp16" {
 		t.Fatalf("dtypes = %+v", dtypes)
+	}
+}
+
+// get fetches a target and returns the recorder, failing on an unexpected status.
+func get(t *testing.T, srv *Server, target string, want int) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+	if rec.Code != want {
+		t.Fatalf("%s: status = %d (want %d), body = %s", target, rec.Code, want, rec.Body.String())
+	}
+	return rec
+}
+
+// The generated page is the "run it anywhere" artifact: it must carry a real
+// model id, an absolute archive URL back to this server, and a pinned runtime —
+// no placeholder may survive substitution.
+func TestStandalonePage(t *testing.T) {
+	srv := newServer(t)
+	writeModel(t, srv.Root, "acme/tiny", map[string]string{"onnx/model_q4.onnx": "Q4"})
+
+	rec := get(t, srv, "/api/standalone.html?model=acme/tiny&dtype=q4", http.StatusOK)
+	body := rec.Body.String()
+
+	if strings.Contains(body, "__") && strings.Contains(body, "__MODEL_ID__") {
+		t.Error("template placeholder left in the generated page")
+	}
+	for _, placeholder := range []string{"__MODEL_ID__", "__ARCHIVE_URL__", "__NEXUS_VERSION__", "__DTYPE_OPTION__"} {
+		if strings.Contains(body, placeholder) {
+			t.Errorf("%s not substituted", placeholder)
+		}
+	}
+	want := "http://example.com/api/model.zip?model=acme%2Ftiny&dtype=q4"
+	if !strings.Contains(body, want) {
+		t.Errorf("archive url %q not found in page", want)
+	}
+	if !strings.Contains(body, "dtype: 'q4'") {
+		t.Error("requested dtype not passed to the loader")
+	}
+	if !strings.Contains(body, "cdn.jsdelivr.net/npm/browser-llm-nexus@") {
+		t.Error("page does not load browser-llm-nexus from a CDN")
+	}
+	if !strings.Contains(body, "<title>acme/tiny") {
+		t.Error("model id not in the page title")
+	}
+	// Downloading is the point: it must arrive as a file, named after the model.
+	if cd := rec.Header().Get("Content-Disposition"); cd != `attachment; filename="acme_tiny-chat.html"` {
+		t.Errorf("content-disposition = %q", cd)
+	}
+}
+
+// ?inline=1 previews the same page in a tab instead of downloading it.
+func TestStandaloneInlinePreview(t *testing.T) {
+	srv := newServer(t)
+	writeModel(t, srv.Root, "acme/tiny", map[string]string{"onnx/model_q4.onnx": "Q4"})
+
+	rec := get(t, srv, "/api/standalone.html?model=acme/tiny&inline=1", http.StatusOK)
+	if cd := rec.Header().Get("Content-Disposition"); cd != "" {
+		t.Errorf("inline preview should not be an attachment, got %q", cd)
+	}
+	// With no dtype the loader must be left on auto, not given an empty value.
+	if body := rec.Body.String(); strings.Contains(body, "dtype: ''") {
+		t.Error("empty dtype emitted")
+	}
+}
+
+func TestStandaloneRejectsBadInput(t *testing.T) {
+	srv := newServer(t)
+	writeModel(t, srv.Root, "acme/tiny", map[string]string{"onnx/model_q4.onnx": "Q4"})
+	for _, tc := range []struct {
+		target string
+		want   int
+	}{
+		{"/api/standalone.html", http.StatusBadRequest},
+		{"/api/standalone.html?model=../../etc", http.StatusBadRequest},
+		{"/api/standalone.html?model=acme/tiny&dtype=q4'+alert(1)", http.StatusBadRequest},
+		{"/api/standalone.html?model=acme/tiny&dtype=int8", http.StatusBadRequest},
+		{"/api/standalone.html?model=acme/notconverted", http.StatusNotFound},
+	} {
+		get(t, srv, tc.target, tc.want)
+	}
+}
+
+// The whole point of the artifacts is that they run from somewhere else, so the
+// read-only model endpoints must be fetchable cross-origin.
+func TestModelArtifactsAreCrossOriginReadable(t *testing.T) {
+	srv := newServer(t)
+	writeModel(t, srv.Root, "acme/tiny", map[string]string{
+		"config.json":        `{"model_type":"qwen3"}`,
+		"onnx/model_q4.onnx": "Q4",
+	})
+	for _, target := range []string{
+		"/api/model.zip?model=acme/tiny",
+		"/models/acme/tiny/config.json",
+	} {
+		rec := get(t, srv, target, http.StatusOK)
+		if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+			t.Errorf("%s: Access-Control-Allow-Origin = %q, want *", target, got)
+		}
 	}
 }

@@ -92,7 +92,9 @@ async function loadModel(id) {
     nexus.on('toolCall', (call, result) => {
       $('toolevents').style.display = 'block';
       $('toolevents-json').textContent += `→ ${call.name}(${JSON.stringify(call.arguments)})\n← ${JSON.stringify(result)}\n`;
-      append('\n[ran ' + call.name + ', thinking…]\n');
+      // Replace rather than append: what streamed so far is the raw <tool_call>
+      // markup, which belongs in the tool panel, not in the answer.
+      log('[ran ' + call.name + ', thinking…]\n');
     });
     await applyTools();
     $('loadinfo').textContent = `${nexus.dtype} · loaded in ${((performance.now() - t0) / 1000).toFixed(1)}s`;

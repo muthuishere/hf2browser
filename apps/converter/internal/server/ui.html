@@ -27,6 +27,11 @@
   #status { margin-top: 1rem; font-weight: 600; }
   a { color: var(--accent); }
   label { display: flex; align-items: center; gap: .3rem; }
+  #ship { margin-top: 2rem; border-top: 1px solid #8883; padding-top: 1rem; }
+  #ship h3 { margin: 0 0 .25rem; }
+  #ship td a { margin-right: .6rem; white-space: nowrap; }
+  #snippetcode { background: var(--card); border-radius: 8px; padding: .85rem; overflow-x: auto;
+                 font-family: ui-monospace, monospace; font-size: .8rem; }
 </style>
 </head>
 <body>
@@ -76,6 +81,22 @@
 
 <div id="status"></div>
 <div id="log"></div>
+
+<section id="ship" hidden>
+  <h3>Take it anywhere</h3>
+  <p class="muted">Models you have already converted. Each one is a plain static artifact —
+    download the weights, download a single self-contained HTML page, or point your own app at
+    <a href="https://www.npmjs.com/package/browser-llm-nexus" target="_blank">browser-llm-nexus</a>.
+    Nothing at runtime talks back to this server.</p>
+  <table id="shiptable">
+    <thead><tr><th>model</th><th>dtype</th><th>size</th><th>run here</th><th>take with you</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <details id="snippet">
+    <summary>Use it from your own page (<code>npm i browser-llm-nexus</code>)</summary>
+    <pre id="snippetcode"></pre>
+  </details>
+</section>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -204,12 +225,59 @@ function convert(id, needsForce, task) {
       $('status').innerHTML = `done — <a href="${url}" target="_blank">chat with ${e.data} in your browser (CPU/WASM)</a>`;
     }
     es.close(); converting = false;
+    loadLocal();   // the new model is now shippable
   });
+}
+
+// ── "Take it anywhere": what to do with a model once it is converted ──────────
+function snippetFor(m) {
+  const zip = `${location.origin}/api/model.zip?model=${encodeURIComponent(m.id)}&dtype=${m.dtype}`;
+  return `import { NexusChat } from 'browser-llm-nexus';
+
+// the archive this server serves — a URL, or a File the user picked
+const chat = await NexusChat.load({ archive: '${zip}' });
+
+// or serve the models/ folder yourself and skip the archive entirely
+// const chat = await NexusChat.load({ base: '/models/', id: '${m.id}' });
+
+chat.tool('get_weather', 'Get current weather for a city', { city: 'string' },
+  async ({ city }) => (await fetch('/api/weather?c=' + city)).json());
+
+console.log(await chat.chat('What is the weather in Chennai?'));`;
+}
+
+async function loadLocal() {
+  let models = [];
+  try { models = await (await fetch('/api/models')).json(); } catch { return; }
+  if (!models.length) return;
+  $('ship').hidden = false;
+  const tbody = $('shiptable').querySelector('tbody');
+  tbody.innerHTML = '';
+  for (const m of models) {
+    const q = encodeURIComponent(m.id);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${m.id}</td><td>${m.dtype}</td><td class="muted">${m.size_mb} MB</td>
+      <td><a href="/demo/?model=${q}" target="_blank">chat</a></td>
+      <td>
+        <a href="/api/model.zip?model=${q}&dtype=${m.dtype}">model.zip</a>
+        <a href="/api/standalone.html?model=${q}&dtype=${m.dtype}">chat.html</a>
+        <a href="/api/standalone.html?model=${q}&dtype=${m.dtype}&inline=1" target="_blank">preview</a>
+        <a href="#" class="code">code</a>
+      </td>`;
+    tr.querySelector('.code').onclick = (e) => {
+      e.preventDefault();
+      $('snippetcode').textContent = snippetFor(m);
+      $('snippet').open = true;
+    };
+    tbody.appendChild(tr);
+  }
+  $('snippetcode').textContent = snippetFor(models[0]);
 }
 
 $('go').onclick = search;
 $('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') search(); });
 search();
+loadLocal();
 </script>
 </body>
 </html>

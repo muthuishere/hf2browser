@@ -11,6 +11,10 @@ no cloud, no server-side inference.
 task up          # build + serve, opens the browser, do everything from there
 ```
 
+Then take it with you: every converted model can be downloaded as one portable
+`model.zip` **and** as a **single self-contained `chat.html`** — no build step, no
+framework, no server of ours. Drop that one file on any static host and it runs.
+
 The converted models are then run by
 **[browser-llm-nexus](https://www.npmjs.com/package/browser-llm-nexus)**
 [![npm](https://img.shields.io/npm/v/browser-llm-nexus?color=cb3837&logo=npm)](https://www.npmjs.com/package/browser-llm-nexus)
@@ -27,6 +31,7 @@ CPU with the same API. This repo produces models for it; it does not depend on t
 | [`browser-llm-nexus`](https://github.com/muthuishere/browser-llm-nexus) | TypeScript (npm) | the browser runtime this produces models for: tool calling, embeddings, RAG, offline bundles, metrics |
 | `verify/` | JavaScript (Node) | behavioral CPU verification: does it generate? does it *actually* emit tool calls? |
 | `demo/` | JavaScript | chat page on the WASM backend with a live JS tool editor |
+| `internal/server/standalone.html` | HTML | the generated single-file chat page handed to users |
 
 Why three languages: Go is the product (fast single binary), Python is build-time
 tooling only — the `optimum`/PyTorch export stack is the only thing on earth that can
@@ -55,6 +60,8 @@ In the UI that opens:
 3. **Chat** — converted models show a Chat button. The chat page auto-loads the best
    dtype and has a **live JS tool editor**: write tools in real JavaScript, hit Apply,
    and the model calls them.
+4. **Take it anywhere** — every converted model gets a row with `model.zip` (the weights),
+   `chat.html` (a self-contained page), and `code` (a snippet for your own app). See below.
 
 ### CLI equivalents
 
@@ -126,16 +133,47 @@ auto-retry with a modern toolchain (`optimum-onnx`, `--no_post_process
 `chat_template.jinja` files are inlined into `tokenizer_config.json` for
 Transformers.js.
 
-## Offline knowledge systems
+## Take it anywhere
 
-`GET /api/model.zip?model=<id>&dtype=q4` serves any converted model as a single
-portable archive — hand that URL (or the downloaded file) to
-[`browser-llm-nexus`](https://github.com/muthuishere/browser-llm-nexus):
+Converting is only half the job — the point is to *ship* what came out. The server
+exposes each converted model as plain static artifacts, and the UI's **Take it anywhere**
+panel links all three per model:
 
-```ts
-const chat = await NexusChat.load({ archive: 'http://localhost:8917/api/model.zip?model=Qwen/Qwen3-0.6B' });
-const chat2 = await NexusChat.load({ archive: fileTheUserPicked });   // File / Blob / bytes
+| endpoint | what you get |
+|---|---|
+| `GET /api/model.zip?model=<id>&dtype=q4` | the weights as one portable archive (`manifest.json` + `files/N.bin`) |
+| `GET /api/standalone.html?model=<id>&dtype=q4` | **a single HTML file** — a complete chat page with tool calling |
+| `GET /models/<id>/…` | the raw Transformers.js folder, if you'd rather serve it yourself |
+
+Model endpoints send `Access-Control-Allow-Origin: *`, so a page hosted somewhere else
+can fetch them.
+
+### The single HTML file
+
+`chat.html` is one file with no build step, no framework and no bundler: it loads
+[browser-llm-nexus](https://www.npmjs.com/package/browser-llm-nexus) from a CDN (pinned to
+the version this repo tested with) and the model from whichever source you point it at.
+Streaming, a live JS tool editor, the full tool-call loop, and tokens/sec are all in there.
+
+Put it on GitHub Pages, S3, an intranet share, a USB stick — it never talks back to
+hf2browser at runtime. One line decides where the weights come from:
+
+```js
+const SOURCE = { archive: 'https://your-host/model.zip' };      // as generated
+// const SOURCE = { archive: fileTheUserPicked };               // the page's file picker
+// const SOURCE = { base: './models/', id: 'Qwen/Qwen3-0.6B' }; // folder next to the page
+// const SOURCE = { hub: 'onnx-community/Qwen3-0.6B-ONNX' };    // Hugging Face
 ```
+
+Serve it over http(s) rather than opening it as `file://` — model weights live in the
+Cache API, which browsers don't expose to `file://` origins. Any static server works
+(`python3 -m http.server`).
+
+Verified end to end: the generated page for `Qwen/Qwen3-0.6B` q4, served from a *different*
+origin, picked WebGPU on its own, ran the full tool loop (`get_weather({city:"Chennai"})` →
+handler → grounded answer), and loaded the same model again from a zip picked off disk.
+
+## Offline knowledge systems
 
 The archive restores into the browser cache, so everything after that is offline.
 Compose it with a vector store and you have a full knowledge bundle
