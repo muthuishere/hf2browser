@@ -44,7 +44,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/convert", s.handleConvert) // SSE
 	mux.Handle("GET /models/", http.StripPrefix("/models/", http.FileServer(http.Dir(s.Root+"/models"))))
 	mux.Handle("GET /demo/", http.StripPrefix("/demo/", http.FileServer(http.Dir(s.Root+"/demo"))))
-	nexusDist := filepath.Join(s.Root, "..", "..", "libs", "browser-llm-nexus", "dist")
+	// browser-llm-nexus ships as an npm package; serve it from verify/node_modules
+	// so the demo page loads the same build the CPU verifier uses.
+	nexusDist := filepath.Join(s.Root, "verify", "node_modules", "browser-llm-nexus", "dist")
 	mux.Handle("GET /nexus/", http.StripPrefix("/nexus/", http.FileServer(http.Dir(nexusDist))))
 	return mux
 }

@@ -2,24 +2,25 @@ version: '3'
 
 tasks:
   up:
-    desc: "THE one command: build lib + app, serve, open browser"
+    desc: "THE one command: build, serve, open browser"
     deps: [build]
     dir: apps/converter
     cmds:
       - ./bin/hf2browser serve
 
   build:
-    desc: Build browser-llm-nexus (TS) + the Go CLI
+    desc: Build the Go CLI + install JS deps (browser-llm-nexus from npm)
     cmds:
-      - task: nexus
+      - task: deps
       - task: app
 
-  nexus:
-    desc: Build the browser-llm-nexus library
-    dir: libs/browser-llm-nexus
+  deps:
+    desc: Install JS dependencies (Transformers.js + browser-llm-nexus)
+    dir: apps/converter/verify
     cmds:
       - npm install --silent
-      - npm run build
+    status:
+      - test -d node_modules/browser-llm-nexus
 
   app:
     desc: Build the Go CLI to apps/converter/bin/hf2browser
@@ -28,10 +29,10 @@ tasks:
       - go build -o bin/hf2browser ./cmd/hf2browser
 
   test:
-    desc: Run all test suites (Go + nexus TS)
+    desc: Run the Go test suite
+    dir: apps/converter
     cmds:
-      - cmd: cd apps/converter && go test ./...
-      - cmd: cd libs/browser-llm-nexus && npm test
+      - go test ./...
 
   search:
     desc: "Search HF Hub: task search -- <query> [--tools-only]"
@@ -71,4 +72,4 @@ tasks:
   clean:
     desc: Remove converted models + build outputs
     cmds:
-      - rm -rf apps/converter/models/* apps/converter/bin libs/browser-llm-nexus/dist
+      - rm -rf apps/converter/models/* apps/converter/bin

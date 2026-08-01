@@ -39,7 +39,7 @@ task up     # builds, serves, opens the browser — search → convert → chat<
 </div>
 
 <h2>browser-llm-nexus in ten lines</h2>
-<pre>import { NexusChat } from './browser-llm-nexus/index.js';
+<pre>import { NexusChat } from 'browser-llm-nexus';
 
 const nexus = await NexusChat.load('Qwen/Qwen3-0.6B');
 nexus.tool('get_weather', 'Current weather for a city',
@@ -50,6 +50,6 @@ const answer = await nexus.chat('Weather in Chennai?');
 // model calls the tool → your JS runs → grounded answer</pre>
 
 <p class="tag">The full app (conversion needs local compute + model storage) runs locally via <code>task up</code>.
-This page ships the <a href="./browser-llm-nexus/index.js">browser-llm-nexus</a> library for direct download.</p>
+This page ships the <a href="https://www.npmjs.com/package/browser-llm-nexus">browser-llm-nexus</a> on npm.</p>
 </body>
 </html>

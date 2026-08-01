@@ -4,7 +4,7 @@
 //
 // usage: node verify/verify.mjs <model-id> [--task text-generation|feature-extraction] [--dtypes q4,q8,fp16]
 import { pipeline, env } from '@huggingface/transformers';
-import { parseToolCalls } from '../../../libs/browser-llm-nexus/dist/toolcalls.js';
+import { parseToolCalls } from 'browser-llm-nexus/toolcalls';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

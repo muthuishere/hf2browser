@@ -17,7 +17,7 @@ task up          # build + serve, opens the browser, do everything from there
 |---|---|---|
 | `cmd/hf2browser`, `internal/` | Go | single-binary CLI + web UI/API server, orchestrates everything |
 | `pytools/tjs_scripts/` | Python (auto-managed by `uv`) | the ONNX export + quantization pipeline (build-time only) |
-| `libs/browser-llm-nexus` | TypeScript | browser library: tool calling, embeddings, RAG, offline bundles, metrics |
+| [`browser-llm-nexus`](https://github.com/muthuishere/browser-llm-nexus) | TypeScript (npm) | the browser runtime this produces models for: tool calling, embeddings, RAG, offline bundles, metrics |
 | `verify/` | JavaScript (Node) | behavioral CPU verification: does it generate? does it *actually* emit tool calls? |
 | `demo/` | JavaScript | chat page on the WASM backend with a live JS tool editor |
 
@@ -56,18 +56,19 @@ task search  -- "qwen instruct" --tools-only
 task check   -- Qwen/Qwen3-0.6B
 task convert -- Qwen/Qwen3-0.6B              # gate → export → q4 → CPU verify
 task verify  -- Qwen/Qwen3-0.6B --dtypes q4
-task test                                     # Go + JS test suites
+task test                                     # Go test suite
 ```
 
 Environment (picked up automatically): `HF_TOKEN` (gated models, never printed),
 `HF_ENDPOINT` (hub mirror), `HF_TIMEOUT` (seconds), `PORT` (serve port; otherwise
 auto-picks a free one from 8917).
 
-## browser-llm-nexus — the browser library
+## Running the converted models
 
-TypeScript, hooks-style, npm-ready (`libs/browser-llm-nexus`) — chat + tool calling,
-embeddings, RAG, offline cache bundles, and metrics. Full docs in
-[libs/browser-llm-nexus/README.md](libs/browser-llm-nexus/README.md).
+Converted models are plain Transformers.js folders — load them with anything. The
+companion runtime is **[browser-llm-nexus](https://github.com/muthuishere/browser-llm-nexus)**
+(`npm install browser-llm-nexus`): GPU or CPU with the same API, plus tool calling,
+embeddings, RAG and offline knowledge bundles.
 
 ```ts
 import { NexusChat } from 'browser-llm-nexus';
@@ -116,15 +117,14 @@ auto-retry with a modern toolchain (`optimum-onnx`, `--no_post_process
 `chat_template.jinja` files are inlined into `tokenizer_config.json` for
 Transformers.js.
 
-## Integrating with offline knowledge systems
+## Offline knowledge systems
 
-Built as the model-supply side for
-[`offline-llm-knowledge-system`](../offline-llm-knowledge-system) (WebLLM/WebGPU today).
-Its Cache-API round-trip (`embed-cache/` ↔ `transformers-cache`) works unchanged for
-these models: add a `'transformersjs'` engine at the `useInference.ts` seam, capture
-the chat model's cache into a `chat-cache/` section on export, restore on import.
-Result: one engine stack (Transformers.js/WASM) for embeddings *and* chat, tool calling
-included, zero WebGPU requirement.
+Models converted here plug straight into
+[`browser-llm-nexus`](https://github.com/muthuishere/browser-llm-nexus)'s
+`NexusKnowledge`: documents → chunk → embed → index → grounded answers, with
+`export({ includeModels: true })` producing a bundle that runs air-gapped (index +
+weights captured from the browser cache). One engine stack for embeddings *and* chat,
+GPU when present, CPU when not.
 
 ## Layout
 
@@ -136,10 +136,13 @@ apps/converter/              the converter app
   verify/                      Node CPU verification (generation + tool calls)
   demo/                        browser chat with live JS tool editor
   models/                      converted output (gitignored)
-libs/browser-llm-nexus/      the TypeScript browser library (npm-ready)
-  src/chat|embed|rag|bundle|metrics|toolcalls|hooks
-site/                        GitHub Pages landing (ships the built library)
+site/                        GitHub Pages landing
 ```
+
+The browser runtime lives in its own repo:
+[muthuishere/browser-llm-nexus](https://github.com/muthuishere/browser-llm-nexus)
+(installed here as an npm dependency of `apps/converter/verify`, and served to the
+demo page at `/nexus/`).
 
 ## License
 
