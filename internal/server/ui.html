@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LLM Browser Converter</title>
+<style>
+  :root { --fg: #1a1a1a; --muted: #777; --bg: #fff; --card: #f6f6f6; --accent: #0a66c2; --ok: #1a7f37; --bad: #b35900; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #eee; --muted: #999; --bg: #111; --card: #1e1e1e; --accent: #58a6ff; --ok: #3fb950; --bad: #d29922; } }
+  body { font-family: -apple-system, sans-serif; color: var(--fg); background: var(--bg); max-width: 960px; margin: 1.5rem auto; padding: 0 1rem; }
+  h2 { margin: 0 0 .25rem; }
+  .muted { color: var(--muted); font-size: .85rem; }
+  #searchbar, #filterbar { display: flex; gap: .5rem; margin: 1rem 0 .5rem; flex-wrap: wrap; align-items: center; }
+  #filterbar { margin-top: .25rem; font-size: .85rem; }
+  input, select, button { font-size: .95rem; padding: .5rem .6rem; border-radius: 6px; border: 1px solid #8884; background: var(--bg); color: var(--fg); }
+  #q { flex: 1; min-width: 200px; }
+  button.primary { background: var(--accent); color: #fff; border: none; cursor: pointer; }
+  button:disabled { opacity: .5; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  td, th { text-align: left; padding: .45rem .5rem; border-bottom: 1px solid #8883; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--accent); }
+  .badge { font-size: .75rem; padding: .1rem .45rem; border-radius: 999px; border: 1px solid; }
+  .tools-yes { color: var(--ok); border-color: var(--ok); }
+  .tools-no { color: var(--bad); border-color: var(--bad); }
+  #log { display: none; white-space: pre-wrap; background: var(--card); border-radius: 8px; padding: 1rem; margin-top: 1rem; max-height: 40vh; overflow-y: auto; font-family: ui-monospace, monospace; font-size: .8rem; }
+  #status { margin-top: 1rem; font-weight: 600; }
+  a { color: var(--accent); }
+  label { display: flex; align-items: center; gap: .3rem; }
+</style>
+</head>
+<body>
+<h2>LLM Browser Converter</h2>
+<p class="muted">Search Hugging Face → download &amp; convert to CPU/WASM ONNX → chat with it in the browser. Models without a tool-calling chat template are flagged.</p>
+
+<div id="searchbar">
+  <input id="q" placeholder="search models… (e.g. qwen instruct)" />
+  <select id="pipeline">
+    <option value="text-generation" selected>chat LLMs</option>
+    <option value="feature-extraction">embedding models</option>
+  </select>
+  <select id="sort">
+    <option value="downloads" selected>most downloaded</option>
+    <option value="trendingScore">trending</option>
+    <option value="likes">most liked</option>
+    <option value="lastModified">newest</option>
+  </select>
+  <input id="tags" placeholder="tags (comma-sep)" size="14" />
+  <button class="primary" id="go">Search</button>
+</div>
+
+<div id="filterbar">
+  <label><input type="checkbox" id="toolsOnly" /> tool calling only</label>
+  <label>max size
+    <select id="maxParams">
+      <option value="0" selected>any</option>
+      <option value="1e9">≤ 1B</option>
+      <option value="3.2e9">≤ 3B</option>
+      <option value="8e9">≤ 8B</option>
+    </select>
+  </label>
+  <span class="muted" id="count"></span>
+</div>
+
+<table id="results" hidden>
+  <thead><tr>
+    <th class="sortable" data-key="id">model</th>
+    <th class="sortable" data-key="params">params</th>
+    <th>~q8 / ~q4</th>
+    <th class="sortable" data-key="downloads">downloads</th>
+    <th>tools</th>
+    <th></th>
+  </tr></thead>
+  <tbody></tbody>
+</table>
+
+<div id="status"></div>
+<div id="log"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmtN = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(0) + 'k' : String(n);
+const fmtP = (n) => !n ? '—' : n >= 1e9 ? (n / 1e9).toFixed(1) + 'B' : (n / 1e6).toFixed(0) + 'M';
+const fmtGB = (bytes) => bytes >= 1e9 ? (bytes / 1e9).toFixed(1) + ' GB' : (bytes / 1e6).toFixed(0) + ' MB';
+// rough on-disk estimates from param count: q8 ≈ 1.05 B/param, q4 ≈ 0.62 B/param
+const fmtSize = (params) => !params ? '—' : fmtGB(params * 1.05) + ' / ' + fmtGB(params * 0.62);
+
+let converting = false;
+let rows = [];            // {id, params, downloads, tools: 'yes'|'no'|'unknown'|'pending'}
+let sortKey = null, sortDir = -1;
+
+async function search() {
+  $('status').textContent = 'searching…';
+  const isChat = $('pipeline').value === 'text-generation';
+  const p = new URLSearchParams({ q: $('q').value, sort: $('sort').value, pipeline: $('pipeline').value });
+  if ($('tags').value.trim()) p.set('tags', $('tags').value.trim());
+  const res = await fetch('/api/search?' + p);
+  const models = await res.json();
+  if (!res.ok) { $('status').textContent = 'search failed: ' + (models.error || res.status); return; }
+  $('status').textContent = '';
+  sortKey = null;
+  rows = models.map(m => ({
+    id: m.id,
+    params: (m.safetensors && m.safetensors.total) || 0,
+    downloads: m.downloads || 0,
+    converted: m.converted,
+    tools: isChat ? 'pending' : 'n/a',
+  }));
+  render();
+  if (isChat) rows.forEach(r => checkTools(r));
+}
+
+async function checkTools(row) {
+  try {
+    const res = await fetch('/api/tools?model=' + encodeURIComponent(row.id));
+    if (!res.ok) throw new Error();
+    const { tools } = await res.json();
+    row.tools = tools ? 'yes' : 'no';
+  } catch {
+    row.tools = 'unknown';
+  }
+  render();
+}
+
+function visible() {
+  const toolsOnly = $('toolsOnly').checked;
+  const maxP = Number($('maxParams').value);
+  return rows.filter(r => {
+    if (toolsOnly && r.tools !== 'yes' && r.tools !== 'n/a') return false;
+    if (maxP && r.params > maxP) return false;
+    return true;
+  });
+}
+
+function render() {
+  const list = visible();
+  if (sortKey) {
+    list.sort((a, b) => {
+      const va = a[sortKey], vb = b[sortKey];
+      return (typeof va === 'string' ? va.localeCompare(vb) : va - vb) * sortDir;
+    });
+  }
+  const tbody = $('results').querySelector('tbody');
+  tbody.innerHTML = '';
+  $('results').hidden = false;
+  $('count').textContent = `${list.length} of ${rows.length} shown`;
+  for (const r of list) {
+    const tr = document.createElement('tr');
+    const toolsCell =
+      r.tools === 'yes' ? '<span class="badge tools-yes">tool calling</span>' :
+      r.tools === 'no' ? '<span class="badge tools-no">no tools</span>' :
+      r.tools === 'n/a' ? '<span class="muted">n/a</span>' :
+      r.tools === 'unknown' ? '?' : '…';
+    const action = r.converted && r.tools !== 'n/a'
+      ? `<a href="/demo/?model=${encodeURIComponent(r.id)}" target="_blank"><button class="primary">Chat</button></a>`
+      : `<button ${r.tools === 'pending' ? 'disabled' : ''}>${r.converted ? 'Ready' : 'Convert'}</button>`;
+    tr.innerHTML = `<td><a href="https://huggingface.co/${r.id}" target="_blank">${r.id}</a></td>
+      <td>${fmtP(r.params)}</td>
+      <td class="muted">${fmtSize(r.params)}</td>
+      <td>${fmtN(r.downloads)}</td>
+      <td>${toolsCell}</td>
+      <td>${action}</td>`;
+    const btn = tr.querySelector('button');
+    if (!(r.converted && r.tools !== 'n/a')) btn.onclick = () => {
+      if (r.tools === 'n/a') return convert(r.id, false, 'feature-extraction');
+      convert(r.id, r.tools !== 'yes');
+    };
+    tbody.appendChild(tr);
+  }
+}
+
+document.querySelectorAll('th.sortable').forEach(th => th.onclick = () => {
+  const key = th.dataset.key;
+  sortDir = (sortKey === key) ? -sortDir : (key === 'id' ? 1 : -1);
+  sortKey = key;
+  render();
+});
+$('toolsOnly').onchange = render;
+$('maxParams').onchange = render;
+
+function convert(id, needsForce, task) {
+  if (converting) return alert('a conversion is already running');
+  if (needsForce && !confirm(id + ' has no tool-calling chat template. Convert anyway?')) return;
+  converting = true;
+  $('log').style.display = 'block';
+  $('log').textContent = '';
+  $('status').textContent = 'starting ' + id + ' …';
+  const p = new URLSearchParams({ model: id });
+  if (needsForce) p.set('force', '1');
+  if (task) p.set('task', task);
+  const es = new EventSource('/api/convert?' + p);
+  const append = (t) => { $('log').textContent += t + '\n'; $('log').scrollTop = $('log').scrollHeight; };
+  es.addEventListener('status', (e) => { $('status').textContent = e.data; append('== ' + e.data + ' =='); });
+  es.addEventListener('log', (e) => append(e.data));
+  es.addEventListener('error', (e) => {
+    if (e.data) { $('status').textContent = 'failed: ' + e.data; append('ERROR: ' + e.data); }
+    es.close(); converting = false;
+  });
+  es.addEventListener('done', (e) => {
+    if (task === 'feature-extraction') {
+      $('status').textContent = 'done — ' + e.data + ' converted (embedding model, ready under /models/)';
+    } else {
+      const url = '/demo/?model=' + encodeURIComponent(e.data);
+      $('status').innerHTML = `done — <a href="${url}" target="_blank">chat with ${e.data} in your browser (CPU/WASM)</a>`;
+    }
+    es.close(); converting = false;
+  });
+}
+
+$('go').onclick = search;
+$('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') search(); });
+search();
+</script>
+</body>
+</html>

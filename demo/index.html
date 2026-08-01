@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Browser CPU LLM chat</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+  #log { white-space: pre-wrap; background: #f5f5f5; border-radius: 8px; padding: 1rem; min-height: 8rem; }
+  input, button, select { font-size: 1rem; padding: .5rem; }
+  #prompt { width: 70%; }
+  .muted { color: #777; font-size: .85rem; }
+  #toolevents { display: none; margin-top: .5rem; }
+  #toolevents pre { background: #eef6ff; border-radius: 8px; padding: .75rem; overflow-x: auto; font-size: .8rem; }
+</style>
+</head>
+<body>
+<h2>Browser CPU LLM chat (WASM — no WebGPU needed)</h2>
+<p class="muted">Runs entirely locally from converted models. Tool calling handled by <code>toolnexus.mjs</code> —
+this demo registers a mock <code>get_weather</code> tool.</p>
+<p>
+  <label>model <select id="model"><option>loading…</option></select></label>
+  <span id="loadinfo" class="muted"></span>
+</p>
+<p>
+  <input id="prompt" value="What is the weather in Chennai right now?" />
+  <button id="send" disabled>Send</button>
+</p>
+<details open>
+  <summary>Tools — plain JS, evaluated live (decorator-pattern <code>tool(...)</code> API)</summary>
+  <div id="editor" style="position:relative; font-family:ui-monospace,monospace; font-size:.8rem; line-height:1.45;">
+    <pre id="highlight" aria-hidden="true" style="position:absolute; inset:0; margin:0; padding:.75rem; overflow:auto; pointer-events:none; border-radius:8px;"><code class="language-javascript"></code></pre>
+    <textarea id="toolcode" rows="14" spellcheck="false"
+      style="position:relative; width:100%; box-sizing:border-box; padding:.75rem; background:transparent; color:transparent; caret-color:#333; border:1px solid #8884; border-radius:8px; font:inherit; line-height:inherit; resize:vertical;"></textarea>
+  </div>
+  <button id="apply">Apply tools</button> <span id="toolinfo" class="muted"></span>
+</details>
+<div id="log">idle</div>
+<div id="toolevents">
+  <strong>Tool activity</strong>
+  <pre id="toolevents-json"></pre>
+</div>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github.min.css">
+<script type="module">
+import { ToolNexus } from '/lib/toolnexus.mjs';
+import hljs from 'https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/es/highlight.min.js';
+
+const $ = (id) => document.getElementById(id);
+
+const DEFAULT_TOOLS = `// Define tools dynamically in real JS — fetch, compute, anything.
+// tool(name, description, { arg: 'type' }, async handler)
+
+tool('get_weather', 'Get current weather for a city', { city: 'string' },
+  async ({ city }) => ({ city, temperature_c: 31, condition: 'humid', source: 'mock' }));
+
+tool('get_watch_count', 'Get how many watches the user owns', {},
+  async () => ({ watches: 7, favourite: 'Casio F-91W' }));
+`;
+
+// syntax-highlighted editor: transparent textarea over a highlight.js <pre>
+function refreshHighlight() {
+  const codeEl = $('highlight').querySelector('code');
+  codeEl.textContent = $('toolcode').value + '\n';
+  codeEl.removeAttribute('data-highlighted');
+  hljs.highlightElement(codeEl);
+}
+$('toolcode').value = DEFAULT_TOOLS;
+$('toolcode').addEventListener('input', refreshHighlight);
+$('toolcode').addEventListener('scroll', () => {
+  $('highlight').scrollTop = $('toolcode').scrollTop;
+  $('highlight').scrollLeft = $('toolcode').scrollLeft;
+});
+refreshHighlight();
+const log = (m) => $('log').textContent = m;
+const append = (m) => $('log').textContent += m;
+
+let nexus = null;
+
+async function loadModel(id) {
+  $('send').disabled = true;
+  $('loadinfo').textContent = 'loading…';
+  log(`Loading ${id} on WASM/CPU …`);
+  if (nexus) { try { await nexus.dispose(); } catch {} nexus = null; }
+  const t0 = performance.now();
+  try {
+    nexus = await ToolNexus.load(id, {
+      onProgress: (p) => { if (p.status === 'progress' && p.file) log(`Loading ${p.file}: ${Math.round(p.progress || 0)}%`); },
+    });
+    await applyTools();
+    $('loadinfo').textContent = `${nexus.dtype} · loaded in ${((performance.now() - t0) / 1000).toFixed(1)}s`;
+    log('Ready. Ask something — weather questions will exercise the tool loop.');
+    $('send').disabled = false;
+  } catch (e) {
+    log('Load failed: ' + e.message);
+  }
+}
+
+async function applyTools() {
+  if (!nexus) return;
+  try {
+    const names = await nexus.evalTools($('toolcode').value);
+    $('toolinfo').textContent = 'registered: ' + names.join(', ');
+  } catch (e) {
+    $('toolinfo').textContent = 'tool code error: ' + e.message;
+  }
+}
+$('apply').onclick = applyTools;
+
+async function init() {
+  const res = await fetch('/api/models');
+  const models = await res.json();
+  const sel = $('model');
+  if (!models.length) { log('no converted models yet — convert one from the main page first'); sel.innerHTML = ''; return; }
+  sel.innerHTML = models.map(m => `<option value="${m.id}">${m.id} (${m.dtype}, ${m.size_mb} MB)</option>`).join('');
+  const wanted = new URLSearchParams(location.search).get('model');
+  if (wanted && models.some(m => m.id === wanted)) sel.value = wanted;
+  sel.onchange = () => loadModel(sel.value);
+  loadModel(sel.value);
+}
+
+$('send').onclick = async () => {
+  const q = $('prompt').value;
+  $('send').disabled = true;
+  log('');
+  $('toolevents').style.display = 'none';
+  $('toolevents-json').textContent = '';
+  try {
+    const answer = await nexus.chat(q, {
+      onToken: (t) => append(t),
+      onToolCall: (call, result) => {
+        $('toolevents').style.display = 'block';
+        $('toolevents-json').textContent += `→ ${call.name}(${JSON.stringify(call.arguments)})\n← ${JSON.stringify(result)}\n`;
+        append('\n[ran ' + call.name + ', thinking…]\n');
+      },
+    });
+    log(answer);
+  } catch (e) {
+    log('error: ' + e.message);
+  }
+  $('send').disabled = false;
+};
+
+init();
+</script>
+</body>
+</html>

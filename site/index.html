@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>hf2browser — any Hugging Face LLM, in your browser, on CPU, with tool calling</title>
+<style>
+  :root { --fg: #1a1a1a; --muted: #666; --bg: #fff; --card: #f6f6f6; --accent: #0a66c2; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #eee; --muted: #999; --bg: #101014; --card: #1c1c22; --accent: #58a6ff; } }
+  body { font-family: -apple-system, sans-serif; color: var(--fg); background: var(--bg); max-width: 760px; margin: 3rem auto; padding: 0 1.25rem; line-height: 1.6; }
+  h1 { font-size: 2rem; margin-bottom: .25rem; }
+  .tag { color: var(--muted); font-size: 1.05rem; margin-top: 0; }
+  pre { background: var(--card); border-radius: 10px; padding: 1rem; overflow-x: auto; font-size: .85rem; }
+  a.btn { display: inline-block; background: var(--accent); color: #fff; padding: .6rem 1.1rem; border-radius: 8px; text-decoration: none; font-weight: 600; margin: .5rem .5rem 0 0; }
+  a { color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .75rem; margin: 1.5rem 0; }
+  .card { background: var(--card); border-radius: 10px; padding: 1rem; }
+  .card h3 { margin: 0 0 .35rem; font-size: 1rem; }
+  .card p { margin: 0; color: var(--muted); font-size: .88rem; }
+</style>
+</head>
+<body>
+<h1>hf2browser</h1>
+<p class="tag">Any Hugging Face LLM → running in your browser on plain CPU — with JavaScript tool calling. No WebGPU, no cloud.</p>
+
+<p>
+  <a class="btn" href="https://github.com/muthuishere/hf2browser">GitHub</a>
+  <a class="btn" href="https://github.com/muthuishere/hf2browser#quick-start">Quick start</a>
+</p>
+
+<pre>git clone https://github.com/muthuishere/hf2browser && cd hf2browser
+task up     # builds, serves, opens the browser — search → convert → chat</pre>
+
+<div class="grid">
+  <div class="card"><h3>Search with tool-calling detection</h3><p>Live HF Hub search flags which models can actually call tools, with size estimates before you download.</p></div>
+  <div class="card"><h3>One-click conversion</h3><p>ONNX export + q4 quantization, streamed live. New architectures auto-retry with a modern toolchain.</p></div>
+  <div class="card"><h3>Verified, not assumed</h3><p>Every conversion is behaviorally tested on CPU — including whether it really emits schema-valid tool calls.</p></div>
+  <div class="card"><h3>toolnexus.mjs</h3><p>Tiny runtime: register JS tools with JSON schema, get an agentic parse → execute → answer loop in the browser.</p></div>
+</div>
+
+<h2>toolnexus in ten lines</h2>
+<pre>import { ToolNexus } from './toolnexus.mjs';
+
+const nexus = await ToolNexus.load('Qwen/Qwen3-0.6B');
+nexus.tool('get_weather', 'Current weather for a city',
+  { city: 'string' },
+  async ({ city }) => fetchWeather(city));
+
+const answer = await nexus.chat('Weather in Chennai?');
+// model calls the tool → your JS runs → grounded answer</pre>
+
+<p class="tag">The full app (conversion needs local compute + model storage) runs locally via <code>task up</code>.
+This page ships the <a href="./toolnexus.mjs">toolnexus.mjs</a> library for direct download.</p>
+</body>
+</html>

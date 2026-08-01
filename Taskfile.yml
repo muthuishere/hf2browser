@@ -1,0 +1,54 @@
+version: '3'
+
+tasks:
+  up:
+    desc: "THE one command: build + test + serve (opens the browser)"
+    deps: [build]
+    cmds:
+      - ./bin/hf2browser serve
+
+  build:
+    desc: Build the Go CLI to bin/hf2browser
+    cmds:
+      - go build -o bin/hf2browser ./cmd/hf2browser
+
+  test:
+    desc: Run Go + JS test suites
+    cmds:
+      - go test ./...
+      - cd verify && node --test *.test.mjs
+
+  search:
+    desc: "Search HF Hub: task search -- <query> [--tools-only]"
+    deps: [build]
+    cmds:
+      - ./bin/hf2browser search {{.CLI_ARGS}}
+
+  check:
+    desc: "Inspect a HF model (tool calling, size): task check -- <model-id>"
+    deps: [build]
+    cmds:
+      - ./bin/hf2browser check {{.CLI_ARGS}}
+
+  convert:
+    desc: "Check + convert + CPU-verify: task convert -- <model-id> [--modes q4] [--force]"
+    deps: [build]
+    cmds:
+      - ./bin/hf2browser convert {{.CLI_ARGS}}
+
+  verify:
+    desc: "Verify a converted model runs on CPU: task verify -- <model-id> [--dtypes q4,q8,fp16]"
+    deps: [build]
+    cmds:
+      - ./bin/hf2browser verify {{.CLI_ARGS}}
+
+  serve:
+    desc: "Web UI (search → convert → chat) — auto-opens browser, auto-picks port"
+    deps: [build]
+    cmds:
+      - ./bin/hf2browser serve
+
+  clean:
+    desc: Remove converted models
+    cmds:
+      - rm -rf models/*

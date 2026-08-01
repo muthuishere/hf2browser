@@ -1,0 +1,8 @@
+models/
+.cache/
+verify/node_modules/
+__pycache__/
+bin/
+.playwright-cli/
+.DS_Store
+verify/package-lock.json

@@ -1,0 +1,25 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Go build + vet + test
+        run: |
+          go build ./...
+          go vet ./...
+          go test ./...
+      - name: JS tests
+        working-directory: verify
+        run: node --test *.test.mjs

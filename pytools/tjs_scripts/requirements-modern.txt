@@ -1,0 +1,7 @@
+transformers[torch]
+optimum-onnx
+onnxruntime==1.21.1
+onnx
+tqdm
+onnxslim
+hf_transfer
