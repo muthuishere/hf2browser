@@ -17,7 +17,7 @@ task up          # build + serve, opens the browser, do everything from there
 |---|---|---|
 | `cmd/hf2browser`, `internal/` | Go | single-binary CLI + web UI/API server, orchestrates everything |
 | `pytools/tjs_scripts/` | Python (auto-managed by `uv`) | the ONNX export + quantization pipeline (build-time only) |
-| `lib/toolnexus.mjs` | JavaScript | browser tool-calling runtime: register JS tools, agentic parse→execute→answer loop |
+| `libs/browser-llm-nexus` | JavaScript | browser tool-calling runtime: register JS tools, agentic parse→execute→answer loop |
 | `verify/` | JavaScript (Node) | behavioral CPU verification: does it generate? does it *actually* emit tool calls? |
 | `demo/` | JavaScript | chat page on the WASM backend with a live JS tool editor |
 
@@ -63,12 +63,12 @@ Environment (picked up automatically): `HF_TOKEN` (gated models, never printed),
 `HF_ENDPOINT` (hub mirror), `HF_TIMEOUT` (seconds), `PORT` (serve port; otherwise
 auto-picks a free one from 8917).
 
-## toolnexus — browser tool calling in ~10 lines
+## browser-llm-nexus — the browser library
 
 ```js
-import { ToolNexus } from '/lib/toolnexus.mjs';
+import { NexusChat } from '/libs/browser-llm-nexus';
 
-const nexus = await ToolNexus.load('Qwen/Qwen3-0.6B');   // auto-picks best dtype
+const nexus = await NexusChat.load('Qwen/Qwen3-0.6B');   // auto-picks best dtype
 
 nexus.tool('get_weather', 'Get current weather for a city',
   { city: 'string' },                                     // shorthand JSON schema
@@ -124,15 +124,16 @@ included, zero WebGPU requirement.
 ## Layout
 
 ```
-cmd/hf2browser/        Go CLI entrypoint
-internal/hf/           HF Hub API, search, tool-calling detection
-internal/pipeline/     convert/verify orchestration, toolchain fallback, pruning
-internal/server/       web UI (embedded) + JSON/SSE API
-lib/toolnexus.mjs      browser tool-calling runtime (the library)
-pytools/tjs_scripts/   vendored conversion pipeline (transformers.js v3.8.1 + patches)
-verify/                Node CPU verification + parser tests
-demo/                  browser chat with live JS tool editor
-models/                converted output (gitignored)
+apps/converter/              the converter app
+  cmd/hf2browser/              Go CLI entrypoint
+  internal/hf|pipeline|server  HF API, orchestration, web UI + JSON/SSE API
+  pytools/tjs_scripts/         vendored conversion pipeline (Python, build-time)
+  verify/                      Node CPU verification (generation + tool calls)
+  demo/                        browser chat with live JS tool editor
+  models/                      converted output (gitignored)
+libs/browser-llm-nexus/      the TypeScript browser library (npm-ready)
+  src/chat|embed|rag|bundle|metrics|toolcalls|hooks
+site/                        GitHub Pages landing (ships the built library)
 ```
 
 ## License

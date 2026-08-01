@@ -43,7 +43,7 @@ this demo registers a mock <code>get_weather</code> tool.</p>
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github.min.css">
 <script type="module">
-import { ToolNexus } from '/lib/toolnexus.mjs';
+import { NexusChat } from '/nexus/index.js';
 import hljs from 'https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/es/highlight.min.js';
 
 const $ = (id) => document.getElementById(id);
@@ -84,8 +84,14 @@ async function loadModel(id) {
   if (nexus) { try { await nexus.dispose(); } catch {} nexus = null; }
   const t0 = performance.now();
   try {
-    nexus = await ToolNexus.load(id, {
+    nexus = await NexusChat.load(id, {
       onProgress: (p) => { if (p.status === 'progress' && p.file) log(`Loading ${p.file}: ${Math.round(p.progress || 0)}%`); },
+    });
+    nexus.on('token', (t) => append(t));
+    nexus.on('toolCall', (call, result) => {
+      $('toolevents').style.display = 'block';
+      $('toolevents-json').textContent += `→ ${call.name}(${JSON.stringify(call.arguments)})\n← ${JSON.stringify(result)}\n`;
+      append('\n[ran ' + call.name + ', thinking…]\n');
     });
     await applyTools();
     $('loadinfo').textContent = `${nexus.dtype} · loaded in ${((performance.now() - t0) / 1000).toFixed(1)}s`;
@@ -126,15 +132,9 @@ $('send').onclick = async () => {
   $('toolevents').style.display = 'none';
   $('toolevents-json').textContent = '';
   try {
-    const answer = await nexus.chat(q, {
-      onToken: (t) => append(t),
-      onToolCall: (call, result) => {
-        $('toolevents').style.display = 'block';
-        $('toolevents-json').textContent += `→ ${call.name}(${JSON.stringify(call.arguments)})\n← ${JSON.stringify(result)}\n`;
-        append('\n[ran ' + call.name + ', thinking…]\n');
-      },
-    });
+    const answer = await nexus.chat(q);
     log(answer);
+    console.log('metrics', nexus.metrics.summary());
   } catch (e) {
     log('error: ' + e.message);
   }

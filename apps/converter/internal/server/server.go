@@ -44,7 +44,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/convert", s.handleConvert) // SSE
 	mux.Handle("GET /models/", http.StripPrefix("/models/", http.FileServer(http.Dir(s.Root+"/models"))))
 	mux.Handle("GET /demo/", http.StripPrefix("/demo/", http.FileServer(http.Dir(s.Root+"/demo"))))
-	mux.Handle("GET /lib/", http.StripPrefix("/lib/", http.FileServer(http.Dir(s.Root+"/lib"))))
+	nexusDist := filepath.Join(s.Root, "..", "..", "libs", "browser-llm-nexus", "dist")
+	mux.Handle("GET /nexus/", http.StripPrefix("/nexus/", http.FileServer(http.Dir(nexusDist))))
 	return mux
 }
 

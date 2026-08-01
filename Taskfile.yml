@@ -2,53 +2,73 @@ version: '3'
 
 tasks:
   up:
-    desc: "THE one command: build + test + serve (opens the browser)"
+    desc: "THE one command: build lib + app, serve, open browser"
     deps: [build]
+    dir: apps/converter
     cmds:
       - ./bin/hf2browser serve
 
   build:
-    desc: Build the Go CLI to bin/hf2browser
+    desc: Build browser-llm-nexus (TS) + the Go CLI
+    cmds:
+      - task: nexus
+      - task: app
+
+  nexus:
+    desc: Build the browser-llm-nexus library
+    dir: libs/browser-llm-nexus
+    cmds:
+      - npm install --silent
+      - npm run build
+
+  app:
+    desc: Build the Go CLI to apps/converter/bin/hf2browser
+    dir: apps/converter
     cmds:
       - go build -o bin/hf2browser ./cmd/hf2browser
 
   test:
-    desc: Run Go + JS test suites
+    desc: Run all test suites (Go + nexus TS)
     cmds:
-      - go test ./...
-      - cd verify && node --test *.test.mjs
+      - cmd: cd apps/converter && go test ./...
+      - cmd: cd libs/browser-llm-nexus && npm test
 
   search:
     desc: "Search HF Hub: task search -- <query> [--tools-only]"
-    deps: [build]
+    deps: [app]
+    dir: apps/converter
     cmds:
       - ./bin/hf2browser search {{.CLI_ARGS}}
 
   check:
-    desc: "Inspect a HF model (tool calling, size): task check -- <model-id>"
-    deps: [build]
+    desc: "Inspect a HF model: task check -- <model-id>"
+    deps: [app]
+    dir: apps/converter
     cmds:
       - ./bin/hf2browser check {{.CLI_ARGS}}
 
   convert:
     desc: "Check + convert + CPU-verify: task convert -- <model-id> [--modes q4] [--force]"
     deps: [build]
+    dir: apps/converter
     cmds:
       - ./bin/hf2browser convert {{.CLI_ARGS}}
 
   verify:
-    desc: "Verify a converted model runs on CPU: task verify -- <model-id> [--dtypes q4,q8,fp16]"
+    desc: "Verify a converted model on CPU: task verify -- <model-id> [--dtypes q4]"
     deps: [build]
+    dir: apps/converter
     cmds:
       - ./bin/hf2browser verify {{.CLI_ARGS}}
 
   serve:
-    desc: "Web UI (search → convert → chat) — auto-opens browser, auto-picks port"
+    desc: "Web UI (search → convert → chat) — auto-opens browser"
     deps: [build]
+    dir: apps/converter
     cmds:
       - ./bin/hf2browser serve
 
   clean:
-    desc: Remove converted models
+    desc: Remove converted models + build outputs
     cmds:
-      - rm -rf models/*
+      - rm -rf apps/converter/models/* apps/converter/bin libs/browser-llm-nexus/dist

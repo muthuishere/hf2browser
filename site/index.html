@@ -35,13 +35,13 @@ task up     # builds, serves, opens the browser — search → convert → chat<
   <div class="card"><h3>Search with tool-calling detection</h3><p>Live HF Hub search flags which models can actually call tools, with size estimates before you download.</p></div>
   <div class="card"><h3>One-click conversion</h3><p>ONNX export + q4 quantization, streamed live. New architectures auto-retry with a modern toolchain.</p></div>
   <div class="card"><h3>Verified, not assumed</h3><p>Every conversion is behaviorally tested on CPU — including whether it really emits schema-valid tool calls.</p></div>
-  <div class="card"><h3>toolnexus.mjs</h3><p>Tiny runtime: register JS tools with JSON schema, get an agentic parse → execute → answer loop in the browser.</p></div>
+  <div class="card"><h3>browser-llm-nexus</h3><p>Tiny runtime: register JS tools with JSON schema, get an agentic parse → execute → answer loop in the browser.</p></div>
 </div>
 
-<h2>toolnexus in ten lines</h2>
-<pre>import { ToolNexus } from './toolnexus.mjs';
+<h2>browser-llm-nexus in ten lines</h2>
+<pre>import { NexusChat } from './browser-llm-nexus/index.js';
 
-const nexus = await ToolNexus.load('Qwen/Qwen3-0.6B');
+const nexus = await NexusChat.load('Qwen/Qwen3-0.6B');
 nexus.tool('get_weather', 'Current weather for a city',
   { city: 'string' },
   async ({ city }) => fetchWeather(city));
@@ -50,6 +50,6 @@ const answer = await nexus.chat('Weather in Chennai?');
 // model calls the tool → your JS runs → grounded answer</pre>
 
 <p class="tag">The full app (conversion needs local compute + model storage) runs locally via <code>task up</code>.
-This page ships the <a href="./toolnexus.mjs">toolnexus.mjs</a> library for direct download.</p>
+This page ships the <a href="./browser-llm-nexus/index.js">browser-llm-nexus</a> library for direct download.</p>
 </body>
 </html>

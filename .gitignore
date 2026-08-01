@@ -1,8 +1,9 @@
 models/
 .cache/
-verify/node_modules/
+node_modules/
 __pycache__/
 bin/
 .playwright-cli/
 .DS_Store
-verify/package-lock.json
+libs/browser-llm-nexus/dist/
+apps/converter/verify/package-lock.json
