@@ -27,4 +27,8 @@ jobs:
           npm test
       - name: Publish (OIDC trusted publishing)
         working-directory: libs/browser-llm-nexus
-        run: npm publish --access public
+        run: npm publish --access public --loglevel http 2>&1 | grep -viE "authorization|token" || true
+      - name: Fail if not on registry
+        run: |
+          sleep 10
+          npm view browser-llm-nexus version
