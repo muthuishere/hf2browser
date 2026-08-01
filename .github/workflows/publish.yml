@@ -13,10 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # NOTE: no registry-url here — setup-node's .npmrc/_authToken placeholder
+      # would override the OIDC exchange and break trusted publishing.
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
       - name: Ensure npm with OIDC support
         run: npm install -g npm@latest && npm --version
       - name: Test
