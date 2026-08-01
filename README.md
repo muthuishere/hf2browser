@@ -73,7 +73,8 @@ embeddings, RAG and offline knowledge bundles.
 ```ts
 import { NexusChat } from 'browser-llm-nexus';
 
-const nexus = await NexusChat.load('Qwen/Qwen3-0.6B');   // auto-picks best dtype
+// the source is always explicit — this server's /models/ folder here
+const nexus = await NexusChat.load({ base: '/models/', id: 'Qwen/Qwen3-0.6B' });
 
 nexus.tool('get_weather', 'Get current weather for a city',
   { city: 'string' },                                     // shorthand JSON schema
@@ -124,8 +125,8 @@ portable archive — hand that URL (or the downloaded file) to
 [`browser-llm-nexus`](https://github.com/muthuishere/browser-llm-nexus):
 
 ```ts
-const chat = await NexusChat.fromArchive('http://localhost:8917/api/model.zip?model=Qwen/Qwen3-0.6B');
-const chat2 = await NexusChat.load(id, { archive: fileTheUserPicked });   // File / Blob / bytes
+const chat = await NexusChat.load({ archive: 'http://localhost:8917/api/model.zip?model=Qwen/Qwen3-0.6B' });
+const chat2 = await NexusChat.load({ archive: fileTheUserPicked });   // File / Blob / bytes
 ```
 
 The archive restores into the browser cache, so everything after that is offline.

@@ -84,7 +84,8 @@ async function loadModel(id) {
   if (nexus) { try { await nexus.dispose(); } catch {} nexus = null; }
   const t0 = performance.now();
   try {
-    nexus = await NexusChat.load(id, {
+    // Explicit source: this server's /models/ folder. The library assumes nothing.
+    nexus = await NexusChat.load({ base: '/models/', id }, {
       onProgress: (p) => { if (p.status === 'progress' && p.file) log(`Loading ${p.file}: ${Math.round(p.progress || 0)}%`); },
     });
     nexus.on('token', (t) => append(t));
