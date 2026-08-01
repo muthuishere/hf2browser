@@ -2,14 +2,18 @@
 package server
 
 import (
+	"archive/zip"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"hash/crc32"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/muthuishere/hf2browser/internal/hf"
 	"github.com/muthuishere/hf2browser/internal/pipeline"
@@ -41,6 +45,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/models", s.handleLocalModels)
 	mux.HandleFunc("GET /api/tools", s.handleTools)
+	mux.HandleFunc("GET /api/model.zip", s.handleModelZip)
 	mux.HandleFunc("GET /api/convert", s.handleConvert) // SSE
 	mux.Handle("GET /models/", http.StripPrefix("/models/", http.FileServer(http.Dir(s.Root+"/models"))))
 	mux.Handle("GET /demo/", http.StripPrefix("/demo/", http.FileServer(http.Dir(s.Root+"/demo"))))
@@ -139,6 +144,106 @@ func (s *Server) isConverted(modelID string) bool {
 		}
 	}
 	return false
+}
+
+// handleModelZip serves a converted model as one portable archive, in the
+// layout browser-llm-nexus's importModel() reads: manifest.json + files/N.bin.
+// Hand the URL (or the downloaded file) to NexusChat.fromArchive and the model
+// loads with no further network calls.
+//
+//	GET /api/model.zip?model=<id>[&dtype=q4]
+func (s *Server) handleModelZip(w http.ResponseWriter, r *http.Request) {
+	model := r.URL.Query().Get("model")
+	if model == "" || strings.Contains(model, "..") {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("valid model required"))
+		return
+	}
+	dtype := r.URL.Query().Get("dtype")
+	modelDir := filepath.Join(s.Root, "models", model)
+	if _, err := os.Stat(modelDir); err != nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("%s is not converted", model))
+		return
+	}
+
+	type manifestFile struct {
+		File string `json:"file"`
+		URL  string `json:"url"`
+		Path string `json:"path"`
+	}
+	type manifest struct {
+		Kind      string         `json:"kind"`
+		ModelID   string         `json:"modelId"`
+		CreatedAt string         `json:"createdAt"`
+		Dtypes    []string       `json:"dtypes"`
+		Files     []manifestFile `json:"files"`
+	}
+
+	dtypeOf := map[string]string{
+		"onnx/model_q4.onnx":        "q4",
+		"onnx/model_quantized.onnx": "q8",
+		"onnx/model_fp16.onnx":      "fp16",
+		"onnx/model.onnx":           "fp32",
+		"onnx/model.onnx_data":      "fp32",
+	}
+
+	// The origin the browser will request these from, so cached URLs match.
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	root := fmt.Sprintf("%s://%s/models/%s/", scheme, r.Host, model)
+
+	var paths []string
+	for _, f := range []string{
+		"config.json", "generation_config.json", "tokenizer.json", "tokenizer_config.json",
+		"special_tokens_map.json", "preprocessor_config.json", "vocab.json", "merges.txt",
+		"added_tokens.json", "chat_template.jinja",
+	} {
+		paths = append(paths, f)
+	}
+	for p, d := range dtypeOf {
+		if dtype == "" || dtype == d {
+			paths = append(paths, p)
+		}
+	}
+	sort.Strings(paths)
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf("attachment; filename=%q", strings.ReplaceAll(model, "/", "_")+".zip"))
+
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+
+	mf := manifest{Kind: "model", ModelID: model, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+	seen := map[string]bool{}
+	for _, p := range paths {
+		full := filepath.Join(modelDir, filepath.FromSlash(p))
+		data, err := os.ReadFile(full)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		name := fmt.Sprintf("files/%d.bin", len(mf.Files))
+		// Stored, not deflated: weights are dense, compressing them buys nothing.
+		fw, err := zw.CreateRaw(&zip.FileHeader{Name: name, Method: zip.Store,
+			CRC32: crc32.ChecksumIEEE(data), CompressedSize64: uint64(len(data)), UncompressedSize64: uint64(len(data))})
+		if err != nil {
+			return
+		}
+		if _, err := fw.Write(data); err != nil {
+			return
+		}
+		mf.Files = append(mf.Files, manifestFile{File: name, URL: root + p, Path: p})
+		if d := dtypeOf[p]; d != "" && !seen[d] {
+			seen[d] = true
+			mf.Dtypes = append(mf.Dtypes, d)
+		}
+	}
+
+	body, _ := json.Marshal(mf)
+	if fw, err := zw.Create("manifest.json"); err == nil {
+		fw.Write(body)
+	}
 }
 
 func (s *Server) handleTools(w http.ResponseWriter, r *http.Request) {

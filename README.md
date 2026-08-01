@@ -119,12 +119,19 @@ Transformers.js.
 
 ## Offline knowledge systems
 
-Models converted here plug straight into
-[`browser-llm-nexus`](https://github.com/muthuishere/browser-llm-nexus)'s
-`NexusKnowledge`: documents → chunk → embed → index → grounded answers, with
-`export({ includeModels: true })` producing a bundle that runs air-gapped (index +
-weights captured from the browser cache). One engine stack for embeddings *and* chat,
-GPU when present, CPU when not.
+`GET /api/model.zip?model=<id>&dtype=q4` serves any converted model as a single
+portable archive — hand that URL (or the downloaded file) to
+[`browser-llm-nexus`](https://github.com/muthuishere/browser-llm-nexus):
+
+```ts
+const chat = await NexusChat.fromArchive('http://localhost:8917/api/model.zip?model=Qwen/Qwen3-0.6B');
+const chat2 = await NexusChat.load(id, { archive: fileTheUserPicked });   // File / Blob / bytes
+```
+
+The archive restores into the browser cache, so everything after that is offline.
+Compose it with a vector store and you have a full knowledge bundle
+(`NexusKnowledge.exportZip({ includeModels: true })` → one zip, runs air-gapped).
+One engine stack for embeddings *and* chat, GPU when present, CPU when not.
 
 ## Layout
 
