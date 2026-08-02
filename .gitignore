@@ -7,3 +7,6 @@ bin/
 .DS_Store
 libs/browser-llm-nexus/dist/
 apps/converter/verify/package-lock.json
+
+# Marketing drafts — written here, published from here, never committed.
+marketing/
