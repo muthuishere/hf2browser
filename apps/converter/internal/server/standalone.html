@@ -114,8 +114,13 @@ async function load(source) {
   if (chat) { try { await chat.dispose(); } catch {} chat = null; }
   const t0 = performance.now();
   try {
-    chat = await NexusChat.load(source, {
+    // loadForTools, not load: this page exists to demonstrate tool calling, so
+    // a quantization that cannot call one is not worth loading. It tries each
+    // in turn and throws naming all of them rather than looking ready and failing
+    // on the first question.
+    chat = await NexusChat.loadForTools(source, {
       ...OPTIONS,
+      onAttempt: (a) => out((a.ok ? '✓ ' : '✗ ') + a.detail + (a.ok ? '' : ' — trying the next quantization')),
       onProgress: (p) => {
         if (p.status === 'progress' && p.file) out(`${p.file} — ${Math.round(p.progress || 0)}%`);
       },

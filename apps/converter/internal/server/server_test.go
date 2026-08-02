@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -357,4 +358,49 @@ func TestPrivateNetworkPreflight(t *testing.T) {
 	if got := rec.Header().Get("Access-Control-Allow-Private-Network"); got != "true" {
 		t.Errorf("GET: Allow-Private-Network = %q, want true", got)
 	}
+}
+
+// The generated chat page loads browser-llm-nexus from a CDN at a pinned
+// version. If the page calls an API that version does not have, it breaks in
+// the visitor's browser with "not a function" and nothing here would notice —
+// the placeholders would all still be substituted. So pin the coupling: any
+// API the page uses must be matched by a floor on the version it asks for.
+func TestStandaloneAPIsExistInPinnedVersion(t *testing.T) {
+	page := string(standaloneHTML)
+	// api -> first browser-llm-nexus version that shipped it.
+	since := map[string]string{
+		"loadForTools": "0.6.0",
+		"selfCheck":    "0.4.9",
+		"evalTools":    "0.4.0",
+	}
+	for api, min := range since {
+		if !strings.Contains(page, api) {
+			continue
+		}
+		if cmpSemver(nexusFallbackVersion, min) < 0 {
+			t.Errorf("standalone.html calls %s (needs browser-llm-nexus >= %s) but nexusFallbackVersion is %s",
+				api, min, nexusFallbackVersion)
+		}
+	}
+}
+
+// cmpSemver compares dotted numeric versions. -1, 0 or 1.
+func cmpSemver(a, b string) int {
+	as, bs := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < 3; i++ {
+		var x, y int
+		if i < len(as) {
+			fmt.Sscanf(as[i], "%d", &x)
+		}
+		if i < len(bs) {
+			fmt.Sscanf(bs[i], "%d", &y)
+		}
+		if x != y {
+			if x < y {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
 }

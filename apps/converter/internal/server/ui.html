@@ -10,6 +10,10 @@
   body { font-family: -apple-system, sans-serif; color: var(--fg); background: var(--bg); max-width: 960px; margin: 1.5rem auto; padding: 0 1rem; }
   h2 { margin: 0 0 .25rem; }
   .muted { color: var(--muted); font-size: .85rem; }
+  tr.fresh { background: rgba(52,120,246,.12); }
+  .tag { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em;
+         border: 1px solid var(--accent, #3478f6); color: var(--accent, #3478f6);
+         border-radius: 999px; padding: 1px 7px; margin-left: 6px; vertical-align: middle; }
   #searchbar, #filterbar { display: flex; gap: .5rem; margin: 1rem 0 .5rem; flex-wrap: wrap; align-items: center; }
   #filterbar { margin-top: .25rem; font-size: .85rem; }
   input, select, button { font-size: .95rem; padding: .5rem .6rem; border-radius: 6px; border: 1px solid #8884; background: var(--bg); color: var(--fg); }
@@ -85,12 +89,13 @@ Models without a tool-calling chat template are flagged before you spend the dow
 
 <section id="ship" hidden>
   <h3>Converted — take it anywhere</h3>
-  <p class="muted">Each model is a plain static artifact. <strong>Open in demo</strong> hands the URL
-    straight to the <a href="https://muthuishere.github.io/browser-llm-nexus/demo/" target="_blank">browser-llm-nexus
-    demo</a>, where you can chat with it, call tools and copy working code — or take the URL and the
-    zip somewhere else entirely. Nothing at runtime talks back to this server.</p>
+  <p class="muted"><strong>Download <code>model.zip</code></strong> — that one file is the whole model,
+    and <code>browser-llm-nexus</code> loads it directly: drop it into the demo's <em>Archive file</em>
+    tab, or <code>NexusChat.loadForTools({ archive: file })</code> in your own page. It works offline,
+    off a USB stick, and never talks back to this server. <em>Open in demo</em> is the same thing
+    without the download, when your browser will reach localhost.</p>
   <table id="shiptable">
-    <thead><tr><th>model</th><th>dtype</th><th>size</th><th>hand it over</th><th>files</th></tr></thead>
+    <thead><tr><th>model</th><th>dtype</th><th>size</th><th>download</th><th>or run it now</th></tr></thead>
     <tbody></tbody>
   </table>
   <p class="muted" id="copystatus"></p>
@@ -98,6 +103,10 @@ Models without a tool-calling chat template are flagged before you spend the dow
     makes your browser ask permission to reach your local network — allow it once and the demo
     loads straight from here. Declined it, or on a browser that won't? Download the
     <code>model.zip</code> and drop it into the demo's <em>Archive file</em> tab instead; same result.</p>
+  <p class="muted"><strong>model.zip</strong> contains every quantization you converted, because which
+    one can actually call a tool is model-specific — <code>loadForTools()</code> tries them in turn and
+    keeps the one that works. Converted with the default <code>--modes q4</code>? Then there is only q4
+    in there; re-run with <code>--modes q4,q8,fp16</code> to give it something to choose from.</p>
   <details id="snippet">
     <summary>Use it from your own page (<code>npm i browser-llm-nexus</code>)</summary>
     <pre id="snippetcode"></pre>
@@ -224,9 +233,15 @@ function convert(id, needsForce, task) {
     es.close(); converting = false;
   });
   es.addEventListener('done', (e) => {
-    $('status').textContent = `done — ${e.data} is ready below: open it in the demo, copy its URL, or download the zip`;
+    $('status').textContent = `done — ${e.data} is ready below: download the zip, or open it straight in the demo`;
     es.close(); converting = false;
-    loadLocal();   // the new model is now shippable
+    // Revealing the section is not the same as showing it to someone: after a
+    // long conversion the page is scrolled to the log, and a freshly converted
+    // model looks like every other row. Take them there and mark it.
+    loadLocal(e.data).then(() => {
+      const row = document.querySelector('#shiptable tr.fresh') || $('ship');
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
   });
 }
 
@@ -235,20 +250,28 @@ function convert(id, needsForce, task) {
 // and does it better. This page's job is to produce the artifact and hand over
 // its URL. Absolute, because the demo runs on another origin.
 const NEXUS_DEMO = 'https://muthuishere.github.io/browser-llm-nexus/demo/';
-const archiveURL = (m) =>
-  `${location.origin}/api/model.zip?model=${encodeURIComponent(m.id)}&dtype=${m.dtype}`;
+// No &dtype= — pack EVERY variant that was converted. Which quantization can
+// actually call a tool is model-specific and inverted between models (Qwen2.5
+// calls at q4 and not q8; Qwen3 is the reverse), so an archive pinned to one
+// dtype leaves NexusChat.loadForTools() nothing to fall back to. Pass a dtype
+// only when you already measured which one works and want the smaller file.
+const archiveURL = (m, dtype) =>
+  `${location.origin}/api/model.zip?model=${encodeURIComponent(m.id)}` +
+  (dtype ? `&dtype=${dtype}` : '');
 const demoURL = (m) =>
-  `${NEXUS_DEMO}?archive=${encodeURIComponent(archiveURL(m))}&dtype=${m.dtype}&name=${encodeURIComponent(m.id)}`;
+  `${NEXUS_DEMO}?archive=${encodeURIComponent(archiveURL(m))}&name=${encodeURIComponent(m.id)}`;
 
 function snippetFor(m) {
   const zip = archiveURL(m);
   return `import { NexusChat } from 'browser-llm-nexus';
 
-// the archive this server serves — a URL, or a File the user picked
-const chat = await NexusChat.load({ archive: '${zip}' });
+// the archive this server serves — a URL, or a File the user picked.
+// loadForTools verifies the model can really call a tool and moves to the
+// next quantization if it cannot, instead of handing back a dud.
+const chat = await NexusChat.loadForTools({ archive: '${zip}' });
 
 // or serve the models/ folder yourself and skip the archive entirely
-// const chat = await NexusChat.load({ base: '/models/', id: '${m.id}' });
+// const chat = await NexusChat.loadForTools({ base: '/models/', id: '${m.id}' });
 
 chat.tool('get_weather', 'Get current weather for a city', { city: 'string' },
   async ({ city }) => (await fetch('/api/weather?c=' + city)).json());
@@ -256,7 +279,7 @@ chat.tool('get_weather', 'Get current weather for a city', { city: 'string' },
 console.log(await chat.chat('What is the weather in Chennai?'));`;
 }
 
-async function loadLocal() {
+async function loadLocal(justConverted) {
   let models = [];
   try { models = await (await fetch('/api/models')).json(); } catch { return; }
   if (!models.length) return;
@@ -266,14 +289,16 @@ async function loadLocal() {
   for (const m of models) {
     const q = encodeURIComponent(m.id);
     const tr = document.createElement('tr');
+    if (m.id === justConverted) tr.className = 'fresh';
     const archive = archiveURL(m);
-    tr.innerHTML = `<td>${m.id}</td><td>${m.dtype}</td><td class="muted">${m.size_mb} MB</td>
+    tr.innerHTML = `<td>${m.id}${m.id === justConverted ? ' <span class="tag">just converted</span>' : ''}</td>
+      <td>${m.dtype}</td><td class="muted">${m.size_mb} MB</td>
       <td>
-        <a href="${demoURL(m)}" target="_blank"><button class="primary">Open in demo</button></a>
+        <a href="${archive}" download><button class="primary">⬇ Download model.zip</button></a>
         <a href="#" class="copy">copy URL</a>
       </td>
       <td>
-        <a href="${archive}">model.zip</a>
+        <a href="${demoURL(m)}" target="_blank">open in demo</a>
         <a href="/api/standalone.html?model=${q}&dtype=${m.dtype}">chat.html</a>
         <a href="#" class="code">code</a>
       </td>`;

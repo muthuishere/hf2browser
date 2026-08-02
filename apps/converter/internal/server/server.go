@@ -2,20 +2,18 @@
 package server
 
 import (
-	"archive/zip"
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"hash/crc32"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/muthuishere/hf2browser/internal/archive"
 	"github.com/muthuishere/hf2browser/internal/hf"
 	"github.com/muthuishere/hf2browser/internal/pipeline"
 )
@@ -28,7 +26,7 @@ var standaloneHTML []byte
 
 // nexusFallbackVersion is used when the installed package can't be read; the
 // generated page pins a version so it keeps working after a breaking release.
-const nexusFallbackVersion = "0.4.2"
+const nexusFallbackVersion = "0.6.0"
 
 // Server wires the HF client and conversion pipeline to HTTP handlers.
 type Server struct {
@@ -208,82 +206,16 @@ func (s *Server) handleModelZip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type manifestFile struct {
-		File string `json:"file"`
-		URL  string `json:"url"`
-		Path string `json:"path"`
-	}
-	type manifest struct {
-		Kind      string         `json:"kind"`
-		ModelID   string         `json:"modelId"`
-		CreatedAt string         `json:"createdAt"`
-		Dtypes    []string       `json:"dtypes"`
-		Files     []manifestFile `json:"files"`
-	}
-
-	dtypeOf := map[string]string{
-		"onnx/model_q4.onnx":        "q4",
-		"onnx/model_quantized.onnx": "q8",
-		"onnx/model_fp16.onnx":      "fp16",
-		"onnx/model.onnx":           "fp32",
-		"onnx/model.onnx_data":      "fp32",
-	}
-
 	// The origin the browser will request these from, so cached URLs match.
 	root := fmt.Sprintf("%s/models/%s/", origin(r), model)
-
-	var paths []string
-	for _, f := range []string{
-		"config.json", "generation_config.json", "tokenizer.json", "tokenizer_config.json",
-		"special_tokens_map.json", "preprocessor_config.json", "vocab.json", "merges.txt",
-		"added_tokens.json", "chat_template.jinja",
-	} {
-		paths = append(paths, f)
-	}
-	for p, d := range dtypeOf {
-		if dtype == "" || dtype == d {
-			paths = append(paths, p)
-		}
-	}
-	sort.Strings(paths)
 
 	w.Header().Set("Content-Type", "application/zip")
 	setCORS(w) // a page hosted elsewhere must be able to fetch it
 	w.Header().Set("Content-Disposition",
 		fmt.Sprintf("attachment; filename=%q", strings.ReplaceAll(model, "/", "_")+".zip"))
 
-	zw := zip.NewWriter(w)
-	defer zw.Close()
-
-	mf := manifest{Kind: "model", ModelID: model, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
-	seen := map[string]bool{}
-	for _, p := range paths {
-		full := filepath.Join(modelDir, filepath.FromSlash(p))
-		data, err := os.ReadFile(full)
-		if err != nil || len(data) == 0 {
-			continue
-		}
-		name := fmt.Sprintf("files/%d.bin", len(mf.Files))
-		// Stored, not deflated: weights are dense, compressing them buys nothing.
-		fw, err := zw.CreateRaw(&zip.FileHeader{Name: name, Method: zip.Store,
-			CRC32: crc32.ChecksumIEEE(data), CompressedSize64: uint64(len(data)), UncompressedSize64: uint64(len(data))})
-		if err != nil {
-			return
-		}
-		if _, err := fw.Write(data); err != nil {
-			return
-		}
-		mf.Files = append(mf.Files, manifestFile{File: name, URL: root + p, Path: p})
-		if d := dtypeOf[p]; d != "" && !seen[d] {
-			seen[d] = true
-			mf.Dtypes = append(mf.Dtypes, d)
-		}
-	}
-
-	body, _ := json.Marshal(mf)
-	if fw, err := zw.Create("manifest.json"); err == nil {
-		fw.Write(body)
-	}
+	// Same writer the CLI's `export` uses — one implementation of the format.
+	archive.Write(w, modelDir, model, root, dtype, time.Now())
 }
 
 // origin is the scheme+host the browser reached this server on, so URLs we bake
