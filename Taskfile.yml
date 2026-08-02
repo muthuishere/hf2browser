@@ -1,6 +1,6 @@
 version: '3'
 
-# Four tasks. Everything else is a subcommand of the binary itself —
+# A handful of tasks. Everything else is a subcommand of the binary itself —
 # `hf2browser search|check|convert|verify|serve|init|where` — so there is no
 # second vocabulary to learn and no wrapper to keep in sync.
 
@@ -16,6 +16,11 @@ tasks:
     dir: apps/converter
     cmds:
       - ./bin/hf2browser serve
+
+  serve:
+    desc: "Build and serve — same as `task up`, named for what it does"
+    cmds:
+      - task: up
 
   build:
     desc: Build the single binary (pipeline, verifier and demo are compiled in)

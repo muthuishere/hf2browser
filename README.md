@@ -4,107 +4,179 @@
 [![ci](https://github.com/muthuishere/hf2browser/actions/workflows/ci.yml/badge.svg)](https://github.com/muthuishere/hf2browser/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
-**Any Hugging Face LLM → running in the browser on plain CPU, with tool calling.**
+**Run a Hugging Face model in the browser.**
 
-🔗 **[Try a model in your browser](https://muthuishere.github.io/browser-llm-nexus/demo/)** — the browser-llm-nexus demo runs converted
-models with tool calling, no install. hf2browser is what produces the models it runs.
+Models on the Hub ship PyTorch weights. A browser can't load those — it needs ONNX,
+quantized small enough to download into a tab. `hf2browser` does that conversion and hands
+you the result as a folder to serve or a single zip to carry.
 
-One command gives you: HF Hub search with tool-calling detection → download → ONNX
-conversion + q4 quantization → CPU verification (including a real tool-call test) →
-a browser chat where the model calls **your JavaScript tools** — all local, no cloud,
-no server-side inference. WebGPU is used when the browser has it and plain CPU/WASM
-when it does not, so nothing here *requires* a GPU.
+No cloud, no GPU required, no server-side inference. The model runs in the tab.
 
-```bash
-./hf2browser serve     # or `task up` from a checkout — build, serve, open the browser
-```
+---
 
-Then take it with you: every converted model can be downloaded as one portable
-`model.zip` **and** as a **single self-contained `chat.html`** — no build step, no
-framework, no server of ours. Drop that one file on any static host and it runs.
+## Four commands
 
-The converted models are then run by
-**[browser-llm-nexus](https://www.npmjs.com/package/browser-llm-nexus)**
-[![npm](https://img.shields.io/npm/v/browser-llm-nexus?color=cb3837&logo=npm)](https://www.npmjs.com/package/browser-llm-nexus)
-— the browser runtime this project pairs with (`npm install browser-llm-nexus`). It is a
-separate, standalone package: tool calling, embeddings, RAG and offline bundles, on GPU or
-CPU with the same API. This repo produces models for it; it does not depend on this repo.
-
-## What's inside
-
-| piece | language | job |
-|---|---|---|
-| `cmd/hf2browser`, `internal/` | Go | single-binary CLI + web UI/API server, orchestrates everything |
-| `embed.go` | Go | compiles the pipeline, verifier and demo page into the binary, so a download is the whole product |
-| `pytools/tjs_scripts/` | Python (auto-managed by `uv`) | the ONNX export + quantization pipeline (build-time only) |
-| [`browser-llm-nexus`](https://github.com/muthuishere/browser-llm-nexus) | TypeScript (npm) | the browser runtime this produces models for: tool calling, embeddings, RAG, offline bundles, metrics |
-| `verify/` | JavaScript (Node) | behavioral CPU verification: does it generate? does it *actually* emit tool calls? |
-| `internal/server/standalone.html` | HTML | the generated single-file chat page handed to users |
-| `site/` | HTML | the GitHub Pages landing page |
-
-Why three languages: Go is the product (fast single binary), Python is build-time
-tooling only — the `optimum`/PyTorch export stack is the only thing on earth that can
-trace HF architectures to ONNX (the architectures are *defined* in Python; a Go/cgo
-port would mean reimplementing every model family by hand, to speed up a step that is
-already >95% native C++). JS is the deployment target. Conversion speed is dominated
-by download (accelerated with `hf_transfer`, HF's Rust engine) and native export math.
-
-## Quick start
-
-**Install it** — one line, nothing to build, nothing to clone:
+**1 — install.** One line, nothing to clone or build:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/muthuishere/hf2browser/main/install.sh | sh
 ```
 
+<details>
+<summary>Windows · direct download · from source</summary>
+
 ```powershell
-# Windows (PowerShell)
 irm https://raw.githubusercontent.com/muthuishere/hf2browser/main/install.ps1 | iex
 ```
 
-It picks the binary for your platform, verifies it against the release
-`SHA256SUMS`, and installs it to `~/.local/bin` (`%LOCALAPPDATA%\hf2browser` on
-Windows). Set `HF2BROWSER_BIN_DIR` to put it elsewhere, or `HF2BROWSER_VERSION=v0.1.1`
-to pin a version.
-
-Prefer to grab the file yourself — `curl`, `wget` or a browser all work:
+Or take a binary straight from the [latest release](https://github.com/muthuishere/hf2browser/releases/latest)
+— every asset has a `SHA256SUMS` beside it:
 
 ```bash
-# macOS (Apple silicon) — swap in darwin-amd64, linux-amd64, linux-arm64 as needed
 curl -fsSL -o hf2browser https://github.com/muthuishere/hf2browser/releases/latest/download/hf2browser-darwin-arm64
-chmod +x hf2browser && ./hf2browser serve
+chmod +x hf2browser
 ```
 
-```powershell
-# Windows
-curl.exe -fsSL -o hf2browser.exe https://github.com/muthuishere/hf2browser/releases/latest/download/hf2browser-windows-amd64.exe
-.\hf2browser.exe serve
-```
-
-Every asset is listed on the [latest release](https://github.com/muthuishere/hf2browser/releases/latest)
-with a `SHA256SUMS` beside it.
-
-The conversion pipeline, the CPU verifier and the chat page are compiled into the
-executable; it unpacks them into `~/.hf2browser` the first time it runs.
-
-**Or build from source:**
+From a checkout (needs Go 1.22+ and [`task`](https://taskfile.dev)):
 
 ```bash
 git clone https://github.com/muthuishere/hf2browser && cd hf2browser
-task up
+task serve
 ```
 
-In a checkout the binary uses the checkout — its `models/`, its `pytools/` — so
-editing a file and rerunning is all there is to the dev loop.
+Inside a checkout the binary uses the checkout — its `models/`, its `pytools/` — so editing
+a file and rerunning is the whole dev loop. Anywhere else it unpacks its embedded copies
+into `~/.hf2browser`. `hf2browser where` tells you which mode you're in.
+</details>
 
-Needed only for *converting*: [`uv`](https://docs.astral.sh/uv/) (drives the Python
-export toolchain) and Node 18+ (the CPU verification step). Serving and chatting
-need neither. Building from source additionally needs Go 1.22+ and
-[`task`](https://taskfile.dev).
+**2 — convert a model:**
 
-### Configuration
+```bash
+hf2browser convert onnx-community/Qwen3-0.6B-ONNX --modes q4,q8
+```
 
-Optional. `hf2browser init` writes a `hf2browser.json` next to you:
+**3 — serve it:**
+
+```bash
+hf2browser serve
+```
+
+A page opens where you can search the Hub, convert, and download what you converted.
+
+**4 — run it.** Each converted model gives you a `model.zip` — that one file is the whole
+model. Drop it into the [live demo](https://muthuishere.github.io/browser-llm-nexus/demo/)
+under *Archive file*, or load it in your own page:
+
+```ts
+import { NexusChat } from 'browser-llm-nexus';
+
+const chat = await NexusChat.loadForTools({ archive: fileTheUserPicked });
+
+chat.tool('get_weather', 'Get current weather for a city', { city: 'string' },
+  async ({ city }) => (await fetch(`/api/weather?c=${city}`)).json());
+
+console.log(await chat.chat('What is the weather in Chennai?'));
+```
+
+The model is now running locally, in the tab, calling your JavaScript.
+
+---
+
+## Why not just use the existing tools?
+
+Converting a model to ONNX is not new. What is missing everywhere else is **finding out
+whether the thing you converted actually works** before you ship it to users.
+
+**Pre-converted repos** (`onnx-community/*`, `Xenova/*`) are genuinely the fastest path when
+your model is already there. A few hundred are. If yours isn't, or you fine-tuned it, you're
+on your own.
+
+**`optimum-cli export onnx`** is the underlying export and it's excellent — it's what runs
+under the hood here. You pick the task, quantize separately, assemble the Transformers.js
+layout, and set up Python yourself.
+
+**transformers.js `convert.py`** is the canonical script for exactly this layout. Clone the
+repo, build a Python env, run it per dtype. No verification of the result.
+
+**WebLLM / MLC** gives faster inference than anything here, but a different compile
+toolchain and model format — and it **requires WebGPU**, so there's no CPU fallback for the
+locked-down laptop.
+
+**llama.cpp / GGUF in WASM** has enormous model coverage in a different format entirely;
+chat templates and tool calling are yours to wire up.
+
+Three things this does that the others don't:
+
+**It checks before you download.** `hf2browser check` reads the chat template and tells you
+whether the model can do tool calling at all — before you spend 2 GB finding out.
+
+**It checks after it converts.** The verify step runs the converted model on CPU and asks
+it to make a real tool call. A model that exports cleanly and then can't call a tool is a
+silent failure everywhere else; here it's a failed conversion.
+
+**It hands over something portable.** A `model.zip` and a self-contained `chat.html`, not
+just a folder of tensors — so "it works on my machine" turns into a file you can send
+someone.
+
+Honest scope: if `onnx-community` already has your model, use that — this exists for the
+long tail, for your own fine-tunes, and for when you need a specific set of quantizations.
+
+## Two things worth knowing before converting
+
+**Convert more than one quantization.** `--modes` defaults to `q4` alone and *deletes* the
+variants you didn't ask for. Which quantization can actually call a tool is
+model-specific and does not transfer — Qwen2.5-0.5B works at q4 and is poor at q8, while
+Qwen3-0.6B is fine at both and broken at fp16. Pass `--modes q4,q8,fp16` and let the
+runtime pick on the user's machine. The cost is size: fp16 is roughly 4× q4.
+
+**A tool-calling template is not the same as tool-calling ability.** SmolLM2-360M has the
+template and fails every test. The search UI badges models actually
+[measured working](https://muthuishere.github.io/browser-llm-nexus/verified-models/) — a
+list kept with the runtime, including the combinations that fail.
+
+## What you get per model
+
+- **`models/<id>/`** — plain Transformers.js layout, serve from any static host
+  (`GET /models/<id>/…`)
+- **`model.zip`** — the whole model in one file; works offline, off a USB stick
+  (`GET /api/model.zip?model=<id>`)
+- **`chat.html`** — a self-contained chat page, no build step, no framework
+  (`GET /api/standalone.html?model=<id>`)
+
+Model endpoints send `Access-Control-Allow-Origin: *`, so a page hosted elsewhere can fetch
+them. Nothing at runtime talks back to this server.
+
+Serve `chat.html` over http(s) rather than opening it as `file://` — weights live in the
+Cache API, which browsers don't expose to `file://` origins. `python3 -m http.server` is
+enough. One line in it decides where the weights come from:
+
+```js
+const SOURCE = { archive: 'https://your-host/model.zip' };      // as generated
+// const SOURCE = { archive: fileTheUserPicked };               // the page's file picker
+// const SOURCE = { base: './models/', id: 'Qwen/Qwen3-0.6B' }; // folder next to the page
+// const SOURCE = { hub: 'onnx-community/Qwen3-0.6B-ONNX' };    // Hugging Face
+```
+
+## The CLI
+
+Every command is a subcommand of the binary — there's no second vocabulary of build tasks:
+
+```bash
+hf2browser search "qwen instruct" --tools-only   # find candidates, tool-calling badge each
+hf2browser check   Qwen/Qwen3-0.6B               # template, size, task — before downloading
+hf2browser convert Qwen/Qwen3-0.6B --modes q4,q8 # gate → export → quantize → CPU verify
+hf2browser verify  Qwen/Qwen3-0.6B --dtypes q4   # re-run the behavioural check
+hf2browser serve                                 # the UI
+hf2browser init | where                          # config, and where things live
+```
+
+Converting needs [`uv`](https://docs.astral.sh/uv/) (drives the Python export toolchain)
+and Node 18+ (the CPU verification step). Serving and running need neither.
+
+<details>
+<summary>Configuration</summary>
+
+Optional. `hf2browser init` writes a `hf2browser.json`:
 
 ```json
 {
@@ -118,178 +190,49 @@ Optional. `hf2browser init` writes a `hf2browser.json` next to you:
 }
 ```
 
-It is read from the working directory, then next to the binary, then
-`~/.hf2browser/`; `--config <path>` overrides all three. Precedence is
-**flags > environment > config file > defaults**, so nothing in here can
-override something you said more specifically.
+Read from the working directory, then next to the binary, then `~/.hf2browser/`;
+`--config <path>` overrides all three. Precedence is **flags > environment > config file >
+defaults**, so nothing here can override something you said more specifically.
 
-`HF_TOKEN` is deliberately *not* a config field — a token is a secret and stays in
-the environment, never in a file that gets copied around. `HF_ENDPOINT`,
-`HF_TIMEOUT` and `PORT` are also read from the environment.
+`HF_TOKEN` is deliberately *not* a config field — a token is a secret and stays in the
+environment, never in a file that gets copied around. `HF_ENDPOINT`, `HF_TIMEOUT` and
+`PORT` are also read from the environment.
+</details>
 
-`hf2browser where` prints which config, work directory and models directory are in
-effect, so none of it has to be guessed.
+<details>
+<summary>Serving to a hosted page (localhost + local network permission)</summary>
 
-In the UI that opens:
+When a hosted (https) page fetches your converter on `localhost`, the browser treats it as
+a public→loopback request and asks for local-network permission — allow it once and the
+demo loads straight from your machine. If it's declined, or the browser has no such
+prompt, download `model.zip` and use the demo's *Archive file* tab; the result is
+identical. The server also sends `Access-Control-Allow-Private-Network` for the older
+preflight-based opt-in, though in testing the browser permission was the deciding factor.
+</details>
 
-1. **Search** — live results with params, estimated q8/q4 download size, downloads,
-   and a **tool-calling badge** per model (detected from the chat template). Filter to
-   tool-calling only, cap by size, click column headers to sort.
-2. **Convert** — streams the whole pipeline log live (SSE). Default output is **q4
-   only** — the smallest browser variant; larger intermediates are pruned automatically.
-3. **Hand it over** — every converted model gets a row with **Open in demo** (opens the
-   [browser-llm-nexus demo](https://muthuishere.github.io/browser-llm-nexus/demo/) with this model's URL already filled in), **copy URL**,
-   `model.zip`, a self-contained `chat.html`, and `code` for your own app.
+<details>
+<summary>Architecture coverage</summary>
 
-Running the model is deliberately not this tool's UI. The demo already does chat, tool
-calling and copy-paste code properly; duplicating it here would mean two of everything.
+The pinned toolchain (transformers 4.49 era) covers Llama, Qwen2, Gemma, Phi, Mistral,
+SmolLM and ~100 more. Newer architectures (Qwen3, …) auto-retry with a modern toolchain
+(`optimum-onnx`, `--no_post_process --skip_validation` for >2 GiB fp32 graphs). Chat
+templates shipped as separate `chat_template.jinja` files are inlined into
+`tokenizer_config.json` for Transformers.js.
+</details>
 
-**On the hand-off:** the model endpoints are readable cross-origin, so a page anywhere can
-fetch them. When that page is hosted (https) and your converter is on `localhost`, the
-browser treats it as a public→loopback request and asks the user for local-network
-permission — allow it once and the demo loads straight from your machine. If it is declined,
-or the browser has no such prompt, download `model.zip` and use the demo's *Archive file*
-tab; the result is identical. The server sends `Access-Control-Allow-Private-Network` for
-the older preflight-based opt-in too, though in testing the browser permission was the
-deciding factor, not the header.
+## How it's built
 
-### The CLI
+- **`cmd/hf2browser`, `internal/`** — Go: single-binary CLI plus the web UI/API server
+- **`pytools/tjs_scripts/`** — Python (auto-managed by `uv`): ONNX export and quantization,
+  build-time only
+- **`verify/`** — JavaScript on Node: does it generate? does it *actually* emit tool calls?
+- **`internal/server/standalone.html`** — the generated single-file chat page
 
-Every command is a subcommand of the binary — there is no second vocabulary of
-build tasks wrapping them:
-
-```bash
-hf2browser search "qwen instruct" --tools-only
-hf2browser check   Qwen/Qwen3-0.6B
-hf2browser convert Qwen/Qwen3-0.6B           # gate → export → q4 → CPU verify
-hf2browser verify  Qwen/Qwen3-0.6B --dtypes q4
-hf2browser serve                             # the UI
-hf2browser init | where                      # config
-```
-
-The Taskfile has four entries — `up`, `build`, `test`, `dist` — and exists only to
-build and launch.
-
-## Running the converted models
-
-Converted models are plain Transformers.js folders — load them with anything. The companion
-runtime is **[browser-llm-nexus](https://www.npmjs.com/package/browser-llm-nexus)** on npm
-(`npm install browser-llm-nexus`) — zero dependencies, TypeScript types included, GPU or CPU
-with the same API, plus tool calling, embeddings, RAG and offline knowledge bundles.
-This repo's own demo page and CPU verifier both run on it.
-
-```ts
-import { NexusChat } from 'browser-llm-nexus';
-
-// the source is always explicit — this server's /models/ folder here
-const nexus = await NexusChat.load({ base: '/models/', id: 'Qwen/Qwen3-0.6B' });
-
-nexus.tool('get_weather', 'Get current weather for a city',
-  { city: 'string' },                                     // shorthand JSON schema
-  async ({ city }) => (await fetch(`/api/weather?c=${city}`)).json());
-
-nexus.on('token', t => render(t));                        // hooks, not callbacks
-nexus.on('toolCall', (call, result) => console.log(call, result));
-
-const answer = await nexus.chat('What is the weather in Chennai?');
-console.log(nexus.metrics.summary());   // tokens/sec, tool_calls_ok, load_ms …
-// → model emits the tool call → your handler runs → result fed back →
-//   final grounded answer. Multi-round, multi-tool.
-```
-
-- Parses every common tool-call format (Qwen/Hermes `<tool_call>`, Mistral
-  `[TOOL_CALLS]`, Llama bare JSON, fenced JSON, string-encoded arguments).
-- Handles reasoning models (`enable_thinking: false`, `<think>` stripping).
-- Injects a system prompt so small models call tools instead of hallucinating.
-- `nexus.evalTools(code)` evaluates user-written JS tool definitions at runtime —
-  the decorator pattern as a function (native `@decorator` syntax isn't in browsers yet;
-  the same `tool(...)` call will work as one when it lands).
-
-## Measured findings you should know
-
-**Quantization vs tool calling.** On small models, aggressive quantization can destroy
-tool-calling while leaving chat intact. Measured with identical greedy prompts:
-
-| model | q4 | q8 | fp16 |
-|---|---|---|---|
-| Qwen2.5-0.5B-Instruct | tools ✗ (identical failure in the official onnx-community artifact) | tools ✗ | tools ✓ |
-| Qwen3-0.6B | **tools ✓** | — | broken graph (known float16 converter gap) |
-
-The verify step measures this per model instead of guessing, and recommends the
-smallest dtype that passes. This is also why the chat pages pin the dtype the server
-reports rather than probing for one: probing prefers fp16 on WebGPU, and a broken
-fp16 graph fails inside ONNX Runtime as a bare numeric abort with no usable message. Rule of thumb: prefer newer model generations; Qwen3-0.6B
-q4 (~1 GB) is the current sweet spot for browser tool calling.
-
-**One binary, two modes.** Run it inside a checkout and it uses the checkout —
-`pytools/`, `verify/`, `models/` — so editing a file and rerunning is the
-whole dev loop. Run it anywhere else and it unpacks its embedded copies into
-`~/.hf2browser` (refreshed automatically when the binary changes, left alone when it
-has not). `hf2browser where` says which mode you are in.
-
-**Architecture coverage.** The pinned toolchain (transformers 4.49 era) covers Llama,
-Qwen2, Gemma, Phi, Mistral, SmolLM and ~100 more. Newer architectures (Qwen3, …)
-auto-retry with a modern toolchain (`optimum-onnx`, `--no_post_process
---skip_validation` for >2 GiB fp32 graphs). Chat templates shipped as separate
-`chat_template.jinja` files are inlined into `tokenizer_config.json` for
-Transformers.js.
-
-## Take it anywhere
-
-Converting is only half the job — the point is to *ship* what came out. The server
-exposes each converted model as plain static artifacts, and the UI's **Take it anywhere**
-panel links all three per model:
-
-| endpoint | what you get |
-|---|---|
-| `GET /api/model.zip?model=<id>&dtype=q4` | the weights as one portable archive (`manifest.json` + `files/N.bin`) |
-| `GET /api/standalone.html?model=<id>&dtype=q4` | **a single HTML file** — a complete chat page with tool calling |
-| `GET /models/<id>/…` | the raw Transformers.js folder, if you'd rather serve it yourself |
-
-Model endpoints send `Access-Control-Allow-Origin: *`, so a page hosted somewhere else
-can fetch them.
-
-### The single HTML file
-
-`chat.html` is one file with no build step, no framework and no bundler: it loads
-[browser-llm-nexus](https://www.npmjs.com/package/browser-llm-nexus) from a CDN (pinned to
-the version this repo tested with) and the model from whichever source you point it at.
-Streaming, a live JS tool editor, the full tool-call loop, and tokens/sec are all in there.
-
-Put it on GitHub Pages, S3, an intranet share, a USB stick — it never talks back to
-hf2browser at runtime. One line decides where the weights come from:
-
-```js
-const SOURCE = { archive: 'https://your-host/model.zip' };      // as generated
-// const SOURCE = { archive: fileTheUserPicked };               // the page's file picker
-// const SOURCE = { base: './models/', id: 'Qwen/Qwen3-0.6B' }; // folder next to the page
-// const SOURCE = { hub: 'onnx-community/Qwen3-0.6B-ONNX' };    // Hugging Face
-```
-
-Serve it over http(s) rather than opening it as `file://` — model weights live in the
-Cache API, which browsers don't expose to `file://` origins. Any static server works
-(`python3 -m http.server`).
-
-Verified end to end: the generated page for `Qwen/Qwen3-0.6B` q4, served from a *different*
-origin, picked WebGPU on its own, ran the full tool loop (`get_weather({city:"Chennai"})` →
-handler → grounded answer), and loaded the same model again from a zip picked off disk.
-
-## Offline knowledge systems
-
-The archive restores into the browser cache, so everything after that is offline.
-Compose it with a vector store and you have a full knowledge bundle
-(`NexusKnowledge.exportZip({ includeModels: true })` → one zip, runs air-gapped).
-One engine stack for embeddings *and* chat, GPU when present, CPU when not.
-
-## The landing page
-
-[muthuishere.github.io/hf2browser](https://muthuishere.github.io/hf2browser/) is a static
-site built from `site/` — what it is, the install line, and a link to the
-[nexus demo](https://muthuishere.github.io/browser-llm-nexus/demo/) for anyone who wants to see a converted model run before installing
-anything. It is not a hosted service: converting needs local compute and disk, so the page
-exists to explain and to hand you the binary.
-
-## Layout
+Python is build-time tooling only: the `optimum`/PyTorch export stack is the only thing
+that can trace HF architectures to ONNX, because those architectures are *defined* in
+Python. A Go port would mean reimplementing every model family by hand to speed up a step
+that is already >95% native C++. Conversion time is dominated by download (accelerated
+with `hf_transfer`, HF's Rust engine) and native export math.
 
 ```
 apps/converter/              the converter app
@@ -301,10 +244,24 @@ apps/converter/              the converter app
 site/                        GitHub Pages landing page
 ```
 
-The browser runtime lives in its own repo:
-[muthuishere/browser-llm-nexus](https://github.com/muthuishere/browser-llm-nexus)
-(installed here as an npm dependency of `apps/converter/verify`, and served to the
-demo page at `/nexus/`).
+## Running the models
+
+Converted models are plain Transformers.js folders — load them with anything. The companion
+runtime is **[browser-llm-nexus](https://www.npmjs.com/package/browser-llm-nexus)**
+[![npm](https://img.shields.io/npm/v/browser-llm-nexus?color=cb3837&logo=npm)](https://www.npmjs.com/package/browser-llm-nexus)
+(`npm install browser-llm-nexus`) — zero dependencies, TypeScript types, WebGPU or CPU with
+the same API, plus tool calling, embeddings, RAG and offline knowledge bundles. It parses
+every common tool-call format, handles reasoning models, and verifies that the model it
+loaded can really call a tool.
+
+It's a separate, standalone package: this repo produces models for it and does not depend
+on it at runtime. Running models is deliberately not this tool's job — the demo already
+does chat, tool calling and copy-paste code properly, and duplicating it here would mean
+two of everything.
+
+The archive restores into the browser cache, so everything after the first load is offline.
+Compose it with a vector store and you get a full knowledge bundle
+(`NexusKnowledge.exportZip({ includeModels: true })` → one zip, runs air-gapped).
 
 ## License
 
