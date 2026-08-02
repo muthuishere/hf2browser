@@ -134,6 +134,13 @@ template and fails every test. The search UI badges models actually
 [measured working](https://muthuishere.github.io/browser-llm-nexus/verified-models/) — a
 list kept with the runtime, including the combinations that fail.
 
+**Converting an embedding model is the easier win.** Switch the search filter to *embedding
+models* and convert one: retrieval at these sizes is far more reliable than tool calling —
+three small embedders retrieve the right document first on 10/10 questions against
+deliberately near-miss distractors, where more than half the chat model × quantization grid
+cannot call a tool at all. If you're building something offline and document-shaped rather
+than agent-shaped, start there.
+
 ## What you get per model
 
 - **`models/<id>/`** — plain Transformers.js layout, serve from any static host
