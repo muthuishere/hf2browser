@@ -24,6 +24,15 @@ var uiHTML []byte
 //go:embed standalone.html
 var standaloneHTML []byte
 
+// verifiedModels is browser-llm-nexus's measured tool-calling results, copied
+// from that repo's data/verified-models.json. Served as-is so the converter's
+// search results, the nexus demo's picker and the nexus docs table all state
+// the same thing — a model marked verified in one place and not another is
+// worse than saying nothing.
+//
+//go:embed verified-models.json
+var verifiedModels []byte
+
 // nexusFallbackVersion is used when the installed package can't be read; the
 // generated page pins a version so it keeps working after a breaking release.
 const nexusFallbackVersion = "0.6.0"
@@ -53,6 +62,11 @@ func (s *Server) Handler() http.Handler {
 		w.Write(uiHTML)
 	})
 	mux.HandleFunc("GET /api/search", s.handleSearch)
+	mux.HandleFunc("GET /api/verified", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		setCORS(w)
+		w.Write(verifiedModels)
+	})
 	mux.HandleFunc("GET /api/models", s.handleLocalModels)
 	mux.HandleFunc("GET /api/tools", s.handleTools)
 	mux.HandleFunc("GET /api/model.zip", s.handleModelZip)

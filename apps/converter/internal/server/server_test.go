@@ -404,3 +404,71 @@ func cmpSemver(a, b string) int {
 	}
 	return 0
 }
+
+// The verified list is the same file browser-llm-nexus ships, served so the
+// converter's search results and that project's demo cannot state different
+// things about the same model. If this endpoint breaks, the UI silently loses
+// its badges rather than erroring — so assert the shape, not just the status.
+func TestVerifiedModelsEndpoint(t *testing.T) {
+	srv := newServer(t)
+	rec := get(t, srv, "/api/verified", http.StatusOK)
+
+	var d struct {
+		MeasuredOn string `json:"measuredOn"`
+		Models     []struct {
+			ID       string `json:"id"`
+			Listable bool   `json:"listable"`
+			Verdict  string `json:"verdict"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &d); err != nil {
+		t.Fatalf("not valid json: %v", err)
+	}
+	if d.MeasuredOn == "" {
+		t.Error("measuredOn missing — an undated measurement is not a measurement")
+	}
+	if len(d.Models) == 0 {
+		t.Fatal("no models in the verified list")
+	}
+	var listable int
+	for _, m := range d.Models {
+		if m.Listable {
+			listable++
+			if m.Verdict != "recommended" {
+				t.Errorf("%s is listable but verdict is %q — a picker must never offer a model we measured as failing", m.ID, m.Verdict)
+			}
+		}
+	}
+	if listable == 0 {
+		t.Error("nothing listable — the picker would have no options")
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q", ct)
+	}
+}
+
+// verified-models.json is a COPY of browser-llm-nexus's file. A copy that
+// drifts is worse than no copy: the two projects would badge the same model
+// differently and both would look authoritative. Nothing can stop the upstream
+// from changing, but this pins the contract the UI depends on, so a paste of a
+// reshaped file fails here instead of silently dropping every badge.
+func TestVerifiedModelsContract(t *testing.T) {
+	var d map[string]any
+	if err := json.Unmarshal(verifiedModels, &d); err != nil {
+		t.Fatalf("embedded copy is not valid json: %v", err)
+	}
+	for _, key := range []string{"models", "measuredOn", "library", "harness", "verdicts", "floor"} {
+		if _, ok := d[key]; !ok {
+			t.Errorf("missing %q — the UI and docs both read this", key)
+		}
+	}
+	models, _ := d["models"].([]any)
+	for _, raw := range models {
+		m, _ := raw.(map[string]any)
+		for _, key := range []string{"id", "verdict", "listable", "label", "dtypes"} {
+			if _, ok := m[key]; !ok {
+				t.Errorf("model %v missing %q", m["id"], key)
+			}
+		}
+	}
+}

@@ -26,6 +26,7 @@
   th.sortable:hover { color: var(--accent); }
   .badge { font-size: .75rem; padding: .1rem .45rem; border-radius: 999px; border: 1px solid; }
   .tools-yes { color: var(--ok); border-color: var(--ok); }
+  .verified { color: var(--accent); border-color: var(--accent); margin-left: .4rem; }
   .tools-no { color: var(--bad); border-color: var(--bad); }
   #log { display: none; white-space: pre-wrap; background: var(--card); border-radius: 8px; padding: 1rem; margin-top: 1rem; max-height: 40vh; overflow-y: auto; font-family: ui-monospace, monospace; font-size: .8rem; }
   #status { margin-top: 1rem; font-weight: 600; }
@@ -122,6 +123,23 @@ const fmtGB = (bytes) => bytes >= 1e9 ? (bytes / 1e9).toFixed(1) + ' GB' : (byte
 const fmtSize = (params) => !params ? '—' : fmtGB(params * 1.05) + ' / ' + fmtGB(params * 0.62);
 
 let converting = false;
+// Measured tool-calling results from browser-llm-nexus. "has a tool-calling
+// chat template" (the tools column) is NOT the same claim as "actually calls
+// tools" — SmolLM2-360M has the template and scores 0/3 — so the two badges
+// mean different things and both are shown.
+let verified = new Map();
+fetch('/api/verified').then(r => r.json()).then(d => {
+  for (const m of d.models) if (m.listable) verified.set(m.id.toLowerCase(), m);
+  if (rows.length) render();   // results already on screen; don't reveal an empty table
+}).catch(() => {});
+const verifiedOf = (id) => {
+  const hit = verified.get(String(id).toLowerCase());
+  if (hit) return hit;
+  // Hub repos are often re-uploads of the same weights under another org.
+  const tail = String(id).split('/').pop().toLowerCase();
+  for (const [k, v] of verified) if (k.split('/').pop() === tail) return v;
+  return null;
+};
 let rows = [];            // {id, params, downloads, tools: 'yes'|'no'|'unknown'|'pending'}
 let sortKey = null, sortDir = -1;
 
@@ -190,7 +208,11 @@ function render() {
     const action = r.converted
       ? '<span class="badge tools-yes">converted ↓</span>'
       : `<button ${r.tools === 'pending' ? 'disabled' : ''}>Convert</button>`;
-    tr.innerHTML = `<td><a href="https://huggingface.co/${r.id}" target="_blank">${r.id}</a></td>
+    const v = verifiedOf(r.id);
+    const vBadge = v
+      ? `<span class="badge verified" title="${v.label} — measured by browser-llm-nexus">verified</span>`
+      : '';
+    tr.innerHTML = `<td><a href="https://huggingface.co/${r.id}" target="_blank">${r.id}</a>${vBadge}</td>
       <td>${fmtP(r.params)}</td>
       <td class="muted">${fmtSize(r.params)}</td>
       <td>${fmtN(r.downloads)}</td>
